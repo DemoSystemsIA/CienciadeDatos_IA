@@ -1,0 +1,12 @@
+[theme]
+base="light"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+enableCORS = false
+enableXsrfProtection = true
+
+[ui]
+hideTopBar = true
