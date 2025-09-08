@@ -757,14 +757,15 @@ else:
     st.info("Sube la estructura correcta en excel.")
 
 
-    #PARA OCULTAR HECHO POR STREAMLIT Y MENU DEPLOY
-hide_st_style = """
-            <style>
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
-            header {visibility: hidden;}
-            </style>
-            """
-st.markdown(hide_st_style, unsafe_allow_html=True)
+        #PARA OCULTAR HECHO POR STREAMLIT Y MENU DEPLOY
+    hide_st_style = """
+                <style>
+                #MainMenu {visibility: hidden;}
+                footer {visibility: hidden;}
+                header {visibility: hidden;}
+                </style>
+                """
+    st.markdown(hide_st_style, unsafe_allow_html=True)
+
 
 
