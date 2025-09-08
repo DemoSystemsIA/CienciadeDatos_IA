@@ -8,17 +8,6 @@ from datetime import datetime
 st.set_page_config(page_title="Distribución de horas según porcentajes Packing-Maquila (ZUPRA)", layout="wide")
 
 
-    #PARA OCULTAR HECHO POR STREAMLIT Y MENU DEPLOY
-hide_st_style = """
-            <style>
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
-            header {visibility: hidden;}
-            </style>
-            """
-st.markdown(hide_st_style, unsafe_allow_html=True)
-
-
 # ---------------- Conexión a PostgreSQL ----------------
 def get_postgres_data():
     """Conecta a Postgres usando st.secrets y devuelve DataFrame.
@@ -768,5 +757,14 @@ else:
     st.info("Sube la estructura correcta en excel.")
 
 
+    #PARA OCULTAR HECHO POR STREAMLIT Y MENU DEPLOY
+hide_st_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
+            </style>
+            """
+st.markdown(hide_st_style, unsafe_allow_html=True)
 
 
