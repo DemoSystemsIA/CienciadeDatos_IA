@@ -755,3 +755,14 @@ if uploaded_file:
 else:
     st.info("Sube la estructura correcta en excel.")
 
+# CSS para ocultar footer y menú
+hide_streamlit_style = """
+    <style>
+    #MainMenu {visibility: hidden;}      /* Oculta el menú hamburguesa */
+    footer {visibility: hidden;}        /* Oculta el footer "Hosted with Streamlit" */
+    header {visibility: hidden;}        /* (Opcional) Oculta la cabecera si molesta */
+    </style>
+"""
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+
+
