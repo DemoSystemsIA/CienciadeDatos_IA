@@ -173,6 +173,7 @@ if uploaded_file:
     else:
         df_labores["ID_ACTIVIDAD"] = df_labores.get("ID-ACT", "").astype(str).str.strip()
 
+
     # COD_LABOR
     possible_c_lab = [c for c in df_labores.columns if "COD_LAB" in c.upper() or "COD_L" in c.upper()]
     if possible_c_lab:
@@ -767,6 +768,7 @@ else:
                 </style>
                 """
     st.markdown(hide_st_style, unsafe_allow_html=True)
+
 
 
 
