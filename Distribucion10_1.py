@@ -18,6 +18,7 @@ def get_postgres_data():
         dbname=st.secrets["postgres"]["dbname"],
         user=st.secrets["postgres"]["user"],
         password=st.secrets["postgres"]["password"]
+        sslmode="require"
     )
     query = """
     SELECT *
@@ -766,6 +767,7 @@ else:
                 </style>
                 """
     st.markdown(hide_st_style, unsafe_allow_html=True)
+
 
 
 
