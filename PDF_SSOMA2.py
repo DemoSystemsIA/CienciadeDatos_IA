@@ -22,11 +22,11 @@ from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
 # ══════════════════════════════════════════════════════════
 # PALETA CORPORATIVA
 # ══════════════════════════════════════════════════════════
-C_NAVY      = colors.HexColor("#0D2340")   # azul corporativo único
+C_NAVY      = colors.HexColor("#0D2340")
 C_BLUE      = colors.HexColor("#0D2340")
 C_BLUE_MID  = colors.HexColor("#0D2340")
 C_BLUE_LITE = colors.HexColor("#E8EDF4")
-C_ORANGE    = colors.HexColor("#0D2340")   # todo azul
+C_ORANGE    = colors.HexColor("#0D2340")
 C_ORANGE_LT = colors.HexColor("#E8EDF4")
 C_GREEN     = colors.HexColor("#16A34A")
 C_GREEN_LT  = colors.HexColor("#F0FDF4")
@@ -42,8 +42,8 @@ C_WHITE     = colors.white
 PW, PH = A4
 ML = 2.0 * cm
 MR = 2.0 * cm
-MT = 2.8 * cm    # espacio header
-MB = 2.2 * cm    # espacio footer
+MT = 2.8 * cm
+MB = 2.2 * cm
 CW = PW - ML - MR
 
 # ══════════════════════════════════════════════════════════
@@ -51,10 +51,39 @@ CW = PW - ML - MR
 # ══════════════════════════════════════════════════════════
 st.set_page_config(layout="wide", page_title="Informe SSOMA", page_icon="📋")
 
-BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
-LOGO_PATH  = os.path.join(BASE_DIR, "logo.png")
-EXCEL_PATH = os.path.join(BASE_DIR, "SSOMA.xlsx")
-SHEET      = "Informe"
+# ══════════════════════════════════════════════════════════
+# URLS REMOTAS — Excel en SharePoint, Logo en GitHub
+# ══════════════════════════════════════════════════════════
+EXCEL_URL = (
+    "https://aquanqape-my.sharepoint.com/:x:/g/personal/soporteti_aquanqa_pe/"
+    "IQAKudFYiQ-bTIzlTJeXm5HbAVAc35k94KZWvES9s6BvOWc?e=H2hy1k&download=1"
+)
+LOGO_URL  = "https://github.com/CCozd/BI_SIG_CAMPO/blob/main/logo.png?raw=true"
+SHEET     = "Informe"
+
+# Ruta local temporal para el logo (se descarga una sola vez por sesión)
+LOGO_TMP_PATH = os.path.join(tempfile.gettempdir(), "ssoma_logo.png")
+
+
+# ══════════════════════════════════════════════════════════
+# DESCARGAR LOGO AL ARRANCAR (si aún no está en disco)
+# ══════════════════════════════════════════════════════════
+def get_logo_path() -> str | None:
+    """Descarga el logo desde GitHub y lo guarda en /tmp. Devuelve la ruta local."""
+    if os.path.exists(LOGO_TMP_PATH):
+        return LOGO_TMP_PATH
+    try:
+        r = requests.get(LOGO_URL, timeout=15)
+        r.raise_for_status()
+        with open(LOGO_TMP_PATH, "wb") as f:
+            f.write(r.content)
+        return LOGO_TMP_PATH
+    except Exception as e:
+        st.warning(f"No se pudo descargar el logo: {e}")
+        return None
+
+
+LOGO_PATH = get_logo_path()
 
 
 # ══════════════════════════════════════════════════════════
@@ -72,7 +101,6 @@ class SeccionBanda(Flowable):
         c = self.canv
         w, h = self.width, self.height
 
-        # Sin fondo — círculo azul con número romano
         cx = 0.23*cm
         cy = h / 2
         c.setFillColor(C_BLUE)
@@ -81,25 +109,22 @@ class SeccionBanda(Flowable):
         c.setFont("Helvetica-Bold", 7.5)
         c.drawCentredString(cx, cy - 0.07*cm, self.numero)
 
-        # Línea horizontal azul bajo el título
         c.setStrokeColor(C_BLUE)
         c.setLineWidth(0.6)
         c.line(0, 0, w, 0)
 
-        # Título en azul oscuro
         c.setFillColor(C_BLUE)
         c.setFont("Helvetica-Bold", 10)
         c.drawString(0.23*cm + 0.42*cm, h/2 - 0.14*cm, self.titulo)
 
 
 # ══════════════════════════════════════════════════════════
-# HEADER / FOOTER  — solo logo, sin texto adicional
+# HEADER / FOOTER
 # ══════════════════════════════════════════════════════════
 def make_header_footer(canv, doc):
     canv.saveState()
 
-    # ── Solo logo, sin fondo ni banda ───────────────────
-    if os.path.exists(LOGO_PATH):
+    if LOGO_PATH and os.path.exists(LOGO_PATH):
         try:
             from PIL import Image as PILImage
             pil     = PILImage.open(LOGO_PATH)
@@ -115,7 +140,6 @@ def make_header_footer(canv, doc):
         except Exception:
             pass
 
-    # ── Footer ───────────────────────────────────────────
     canv.setFillColor(C_GRAY_BG)
     canv.rect(0, 0, PW, MB - 0.05*cm, fill=1, stroke=0)
 
@@ -127,7 +151,6 @@ def make_header_footer(canv, doc):
     canv.setLineWidth(0.4)
     canv.line(0, MB - 0.18*cm, PW, MB - 0.18*cm)
 
-    # Texto footer
     canv.setFillColor(C_GRAY_M)
     canv.setFont("Helvetica", 6.5)
     canv.drawString(ML, MB - 0.58*cm,
@@ -221,9 +244,7 @@ def generar_pdf(r):
     )
     el = []
 
-    # ─────────────────────────────────────────────────────
-    # BLOQUE TÍTULO
-    # ─────────────────────────────────────────────────────
+    # ── BLOQUE TÍTULO ────────────────────────────────────
     el.append(Spacer(1, 0.15*cm))
 
     t_titulo = Table([
@@ -242,16 +263,7 @@ def generar_pdf(r):
     el.append(t_titulo)
     el.append(Spacer(1, 0.4*cm))
 
-    # ─────────────────────────────────────────────────────
-    # DATOS CABECERA  (sin cuadro — solo texto con separador)
-    # Estructura visual igual al PDF base:
-    #   PARA    :  Nombre
-    #              Puesto          ← sin etiqueta
-    #   DE      :  Nombre
-    #              Puesto          ← sin etiqueta
-    #   ASUNTO  :  ...
-    #   FECHA   :  DD/MM/YYYY
-    # ─────────────────────────────────────────────────────
+    # ── DATOS CABECERA ───────────────────────────────────
     lbl_s  = PS("lbl_c",  fontSize=9,  fontName="Helvetica-Bold",
                 textColor=C_NAVY, leading=14)
     sep_s  = PS("sep_c",  fontSize=9,  fontName="Helvetica-Bold",
@@ -269,9 +281,9 @@ def generar_pdf(r):
 
     cab_data = [
         fila_cab("PARA",   r["PARA"]),
-        fila_cab("",       r["PUESTO_PARA"]),#, italic=True),
+        fila_cab("",       r["PUESTO_PARA"]),
         fila_cab("DE",     r["DE"]),
-        fila_cab("",       r["PUESTO_DE"]),#,   italic=True),
+        fila_cab("",       r["PUESTO_DE"]),
         fila_cab("ASUNTO", r["ASUNTO"]),
         fila_cab("FECHA",  fmt_fecha(r["FECHA_INFORME"])),
     ]
@@ -283,31 +295,24 @@ def generar_pdf(r):
         ("BOTTOMPADDING", (0,0), (-1,-1), 3),
         ("LEFTPADDING",   (0,0), (0,-1),  0),
         ("LEFTPADDING",   (2,0), (2,-1),  4),
-        # Línea horizontal solo debajo de FECHA (última fila)
         ("LINEBELOW",     (0,5), (-1,5),  0.6, C_GRAY_L),
     ]))
     el.append(t_cab)
     el.append(Spacer(1, 0.5*cm))
 
-    # ─────────────────────────────────────────────────────
-    # I. OBJETIVO  — texto plano, sin cuadro
-    # ─────────────────────────────────────────────────────
+    # ── I. OBJETIVO ──────────────────────────────────────
     el.append(SeccionBanda("I", "OBJETIVO"))
     el.append(Spacer(1, 0.2*cm))
     el.append(Paragraph(safe(r["OBJETIVO"]), S_TEXTO))
     el.append(Spacer(1, 0.4*cm))
 
-    # ─────────────────────────────────────────────────────
-    # II. ALCANCE  — texto plano, sin cuadro
-    # ─────────────────────────────────────────────────────
+    # ── II. ALCANCE ──────────────────────────────────────
     el.append(SeccionBanda("II", "ALCANCE"))
     el.append(Spacer(1, 0.2*cm))
     el.append(Paragraph(safe(r["ALCANCE"]), S_TEXTO))
     el.append(Spacer(1, 0.4*cm))
 
-    # ─────────────────────────────────────────────────────
-    # III. DESARROLLO  — CON CUADRO
-    # ─────────────────────────────────────────────────────
+    # ── III. DESARROLLO ──────────────────────────────────
     el.append(SeccionBanda("III", "DESARROLLO DE LA ACTIVIDAD"))
     el.append(Spacer(1, 0.25*cm))
 
@@ -339,9 +344,7 @@ def generar_pdf(r):
     el.append(t_act)
     el.append(Spacer(1, 0.4*cm))
 
-    # ─────────────────────────────────────────────────────
-    # IV. INCIDENCIAS  — texto plano, sin cuadro
-    # ─────────────────────────────────────────────────────
+    # ── IV. INCIDENCIAS ──────────────────────────────────
     el.append(SeccionBanda("IV", "INCIDENCIAS"))
     el.append(Spacer(1, 0.2*cm))
 
@@ -352,9 +355,7 @@ def generar_pdf(r):
         el.append(Paragraph(inc, S_TEXTO))
     el.append(Spacer(1, 0.4*cm))
 
-    # ─────────────────────────────────────────────────────
-    # V. RECOMENDACIONES  — lista numerada, sin cuadro
-    # ─────────────────────────────────────────────────────
+    # ── V. RECOMENDACIONES ───────────────────────────────
     el.append(SeccionBanda("V", "RECOMENDACIONES"))
     el.append(Spacer(1, 0.2*cm))
 
@@ -370,9 +371,7 @@ def generar_pdf(r):
             el.append(Paragraph(f"{idx}.&nbsp;&nbsp;{rec}", bullet_s))
     el.append(Spacer(1, 0.4*cm))
 
-    # ─────────────────────────────────────────────────────
-    # VI. ANEXOS FOTOGRÁFICOS  — fotos con marco
-    # ─────────────────────────────────────────────────────
+    # ── VI. ANEXOS FOTOGRÁFICOS ───────────────────────────
     tiene_fotos = any(pd.notna(r.get(f"ANEXO{i}")) for i in range(1, 6))
     if tiene_fotos:
         el.append(PageBreak())
@@ -419,7 +418,6 @@ def generar_pdf(r):
                 except Exception as e:
                     el.append(Paragraph(f"[Error imagen {i}: {e}]", S_TEXTO))
 
-    # ─────────────────────────────────────────────────────
     doc.build(el, onFirstPage=make_header_footer, onLaterPages=make_header_footer)
     buf.seek(0)
 
@@ -431,13 +429,20 @@ def generar_pdf(r):
 
 
 # ══════════════════════════════════════════════════════════
-# CARGAR EXCEL
+# CARGAR EXCEL DESDE SHAREPOINT
 # ══════════════════════════════════════════════════════════
-@st.cache_data
+@st.cache_data(ttl=300)   # refresca cada 5 minutos
 def cargar():
-    df = pd.read_excel(EXCEL_PATH, sheet_name=SHEET)
-    df.columns = df.columns.str.strip()
-    return df
+    """Descarga el Excel desde SharePoint y lo carga en un DataFrame."""
+    try:
+        response = requests.get(EXCEL_URL, timeout=30)
+        response.raise_for_status()
+        df = pd.read_excel(BytesIO(response.content), sheet_name=SHEET)
+        df.columns = df.columns.str.strip()
+        return df
+    except Exception as e:
+        st.error(f"No se pudo cargar el Excel desde SharePoint: {e}")
+        st.stop()
 
 df = cargar()
 
