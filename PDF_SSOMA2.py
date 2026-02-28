@@ -517,29 +517,38 @@ if st.session_state.get("pdf_listo"):
     st.success("✅ Informe generado. Revisa la vista previa antes de descargar.")
     st.markdown("---")
 
+    pdf_bytes = st.session_state["pdf_bytes"]
+
+    # Intentar con pdf2image (requiere poppler en el sistema)
+    rendered = False
     try:
-        import fitz
-        pdf_bytes = st.session_state["pdf_bytes"]
-
-        # Abrir desde bytes en memoria — sin escribir nada en disco
-        doc_prev = fitz.open(stream=pdf_bytes, filetype="pdf")
-        n_pag    = len(doc_prev)
-
+        from pdf2image import convert_from_bytes
+        paginas = convert_from_bytes(pdf_bytes, dpi=180)
+        n_pag   = len(paginas)
         st.markdown(f"### 🔍 Vista Previa — {n_pag} página{'s' if n_pag > 1 else ''}")
-
-        for i, pagina in enumerate(doc_prev, start=1):
+        for i, img_pil in enumerate(paginas, start=1):
             _, col_c, _ = st.columns([0.5, 11, 0.5])
             with col_c:
-                mat = fitz.Matrix(2.2, 2.2)
-                pix = pagina.get_pixmap(matrix=mat, alpha=False, colorspace=fitz.csRGB)
-                # Convertir a PNG en memoria (BytesIO) — evita el error de 'static/'
-                img_buf = BytesIO(pix.tobytes("png"))
+                img_buf = BytesIO()
+                img_pil.save(img_buf, format="PNG")
+                img_buf.seek(0)
                 st.image(img_buf, use_container_width=True,
                          caption=f"Página {i} de {n_pag}")
                 if i < n_pag:
                     st.markdown("<div style='height:12px'></div>",
                                 unsafe_allow_html=True)
-        doc_prev.close()
+        rendered = True
+    except Exception:
+        pass
 
-    except Exception as e:
-        st.error(f"No se pudo generar la vista previa: {e}")
+    # Fallback: iframe con PDF embebido en base64 (funciona siempre)
+    if not rendered:
+        import base64
+        b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+        st.markdown("### 🔍 Vista Previa")
+        st.markdown(
+            f'<iframe src="data:application/pdf;base64,{b64}" '
+            f'width="100%" height="950px" '
+            f'style="border:1px solid #CBD5E1; border-radius:8px;"></iframe>',
+            unsafe_allow_html=True,
+        )
