@@ -49,7 +49,7 @@ CW = PW - ML - MR
 # ══════════════════════════════════════════════════════════
 # STREAMLIT CONFIG
 # ══════════════════════════════════════════════════════════
-st.set_page_config(layout="wide", page_title="Informe SSOMA", page_icon="📋")
+st.set_page_config(layout="wide", page_title="Informe PDF para SSOMA", page_icon="📋")
 
 # ══════════════════════════════════════════════════════════
 # URLS REMOTAS — Excel en SharePoint, Logo en GitHub
@@ -464,7 +464,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown("## 📋 Generador de Informe SSOMA")
-st.caption("Selecciona los filtros, genera la vista previa y descarga el PDF corporativo.")
+st.caption("Filtra tus datos, genera la vista previa para que valides y finalmente descarga el PDF corporativo.")
 st.divider()
 
 # ── Filtros ──────────────────────────────────────────────
