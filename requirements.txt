@@ -9,3 +9,5 @@ requests
 Pillow
 fitz
 frontend
+pdf2image
+
