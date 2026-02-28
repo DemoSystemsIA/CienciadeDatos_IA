@@ -520,8 +520,10 @@ if st.session_state.get("pdf_listo"):
     try:
         import fitz
         pdf_bytes = st.session_state["pdf_bytes"]
-        doc_prev  = fitz.open(stream=pdf_bytes, filetype="pdf")
-        n_pag     = len(doc_prev)
+
+        # Abrir desde bytes en memoria — sin escribir nada en disco
+        doc_prev = fitz.open(stream=pdf_bytes, filetype="pdf")
+        n_pag    = len(doc_prev)
 
         st.markdown(f"### 🔍 Vista Previa — {n_pag} página{'s' if n_pag > 1 else ''}")
 
@@ -529,8 +531,10 @@ if st.session_state.get("pdf_listo"):
             _, col_c, _ = st.columns([0.5, 11, 0.5])
             with col_c:
                 mat = fitz.Matrix(2.2, 2.2)
-                pix = pagina.get_pixmap(matrix=mat, alpha=False)
-                st.image(pix.tobytes("png"), use_container_width=True,
+                pix = pagina.get_pixmap(matrix=mat, alpha=False, colorspace=fitz.csRGB)
+                # Convertir a PNG en memoria (BytesIO) — evita el error de 'static/'
+                img_buf = BytesIO(pix.tobytes("png"))
+                st.image(img_buf, use_container_width=True,
                          caption=f"Página {i} de {n_pag}")
                 if i < n_pag:
                     st.markdown("<div style='height:12px'></div>",
