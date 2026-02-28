@@ -7,3 +7,4 @@ xlsxwriter>=3.2.0
 reportlab
 requests
 Pillow
+fitz
