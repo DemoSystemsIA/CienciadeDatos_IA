@@ -7,6 +7,7 @@ Tablero Streamlit sobre la carpeta C:\\FILTER
 """
 from __future__ import annotations
 import os
+import uuid
 import datetime as dt
 
 import pandas as pd
@@ -70,9 +71,83 @@ def cambiar_raiz(nueva: str) -> None:
     st.rerun()
 
 
+# ¿Escritorio del usuario o servidor web? Un servidor NO puede leer el disco de
+# quien lo visita, así que allí la carpeta se sube desde el navegador.
+SERVIDOR = carpetas.modo_servidor()
+
+if SERVIDOR:
+    carpetas.limpiar_temporales()
+    if "token_sesion" not in st.session_state:
+        st.session_state["token_sesion"] = uuid.uuid4().hex
+
 if "raiz_actual" not in st.session_state:
-    _rec = carpetas.recientes()
-    st.session_state["raiz_actual"] = _rec[0] if _rec else C.CARPETA_POR_DEFECTO
+    if SERVIDOR:
+        st.session_state["raiz_actual"] = ""
+    else:
+        _rec = carpetas.recientes()
+        st.session_state["raiz_actual"] = _rec[0] if _rec else C.CARPETA_POR_DEFECTO
+
+
+def panel_web() -> str:
+    """Barra lateral de la versión web: cada usuario sube SU carpeta."""
+    destino = carpetas.carpeta_sesion(st.session_state["token_sesion"])
+    H('<div class="ptit">Tu carpeta</div>'
+      '<div class="psub">Esta versión corre en un servidor, no en tu PC, así que no '
+      'puede abrir tus discos. Elige tu carpeta desde el navegador y se procesa al '
+      'momento: lo que subas es solo de esta sesión y se borra sola.</div>')
+
+    modo = st.radio("Cómo subir", ["Carpeta en .zip", "Archivos sueltos"],
+                    horizontal=True, key="modo_carga", label_visibility="collapsed")
+
+    def _cargar(firma, fn, etiqueta):
+        if st.session_state.get("_firma_carga") == firma:
+            return
+        with st.spinner("Leyendo tu carpeta…"):
+            rep = fn()
+        st.session_state["_firma_carga"] = firma
+        st.session_state["_rep_carga"] = rep
+        st.session_state["etiqueta_origen"] = etiqueta
+        st.session_state["raiz_actual"] = rep["raiz"] if rep["ok"] else ""
+
+    if modo == "Carpeta en .zip":
+        z = st.file_uploader(
+            "Sube tu carpeta comprimida", type=["zip"], key="up_zip",
+            help="En Windows: clic derecho sobre la carpeta (la que contiene las "
+                 "cuadrillas) → Enviar a → Carpeta comprimida (en zip).")
+        if z is not None:
+            _cargar(("zip", z.name, z.size),
+                    lambda: carpetas.extraer_zip(z, destino), z.name)
+    else:
+        fs = st.file_uploader(
+            "Sube los Excel y los PDF", type=["xlsx", "xlsm", "pdf"],
+            accept_multiple_files=True, key="up_files",
+            help="Selecciona los Resumen_NEW_VIP_*.xlsx y todos los PDF de Adjuntos. "
+                 "La cuadrilla se deduce del nombre de cada Excel.")
+        if fs:
+            _cargar(("sueltos", tuple(sorted((f.name, f.size) for f in fs))),
+                    lambda: carpetas.guardar_sueltos(fs, destino),
+                    f"{len(fs)} archivos")
+
+    rep = st.session_state.get("_rep_carga")
+    if rep and rep["ok"]:
+        st.caption(f"✅ {rep['excels']} Excel · {rep['pdfs']} PDF"
+                   + (f" · {rep['ignorados']} archivos ignorados" if rep["ignorados"] else ""))
+    elif rep:
+        st.error(rep["motivo"])
+
+    if st.session_state.get("raiz_actual"):
+        if st.button("🗑️  Borrar mis datos del servidor", **ANCHO, key="btn_borrar"):
+            carpetas.borrar_sesion(destino)
+            for k in ("raiz_actual", "_firma_carga", "_rep_carga", "etiqueta_origen",
+                      "up_zip", "up_files"):
+                st.session_state.pop(k, None)
+            st.rerun()
+
+    H('<div class="nota" style="margin-top:10px;font-size:11.5px;padding:10px 12px">'
+      '<b>Estructura esperada dentro del .zip</b><br>'
+      'una carpeta por cuadrilla, cada una con su <code>Resumen_NEW_VIP_*.xlsx</code> '
+      'y su subcarpeta <code>Adjuntos</code> con los PDF.</div>')
+    return st.session_state.get("raiz_actual", "")
 
 
 # ---------------------------------------------------------------- sidebar
@@ -89,6 +164,12 @@ with st.sidebar:
     st.divider()
 
     raiz = st.session_state["raiz_actual"]
+
+if SERVIDOR:
+    with st.sidebar:
+        raiz = panel_web()
+else:
+  with st.sidebar:
     diag = carpetas.diagnostico(raiz)
 
     H('<div class="ptit">Carpeta de trabajo</div>')
@@ -151,20 +232,57 @@ with st.sidebar:
             carpetas.olvidar()
             st.rerun()
 
+ARBOL = ("FILTER\\\n├── ESTIBAS01\\\n│   ├── Resumen_NEW_VIP_ESTIBAS01.xlsx\n"
+         "│   └── Adjuntos\\\n│       ├── ANEXO_12345678_type2.pdf\n"
+         "│       └── ANEXO_87654321_type2.pdf\n"
+         "├── CHOFERES DE KIAS\\\n│   ├── Resumen_NEW_VIP_CHOFERES DE KIAS.xlsx\n"
+         "│   └── Adjuntos\\\n└── PACKING\\\n    └── …")
+
+# ---- versión web sin carpeta subida todavía: pantalla de bienvenida ----
+if SERVIDOR and not raiz:
+    H(ui.hero_vacio())
+    st.warning("**Esta app es pública.** Cualquiera con el enlace puede abrirla y subir "
+               "su propia carpeta. Nadie ve los datos de otra sesión, pero los reportes "
+               "que subas viajan al servidor: no subas información que no deba salir de "
+               "la empresa sin autorización.", icon="⚠️")
+    c1, c2 = st.columns([1.15, 1], gap="large")
+    with c1:
+        H('<div class="sectitle"><h2>Sube tu carpeta y listo</h2>'
+          '<p>El tablero se arma solo: no se guarda nada entre sesiones.</p></div>')
+        st.markdown(
+            "1. En tu PC, ubica la carpeta que **contiene las cuadrillas** "
+            "(la que tiene dentro `ESTIBAS01`, `CHOFERES DE KIAS`, `PACKING`…).\n"
+            "2. Clic derecho sobre ella → **Enviar a** → **Carpeta comprimida (en zip)**.\n"
+            "3. Arrastra ese `.zip` al recuadro de la **barra lateral**.\n\n"
+            "¿Prefieres no comprimir? Cambia a **Archivos sueltos** y selecciona los "
+            "`Resumen_NEW_VIP_*.xlsx` junto con todos los PDF: la cuadrilla se deduce "
+            "del nombre de cada Excel.")
+        st.info(f"Tamaño máximo por archivo: **{C.MAX_SUBIDA_MB} MB**. "
+                "Si tu carpeta pesa más, sube una cuadrilla a la vez.", icon="📦")
+    with c2:
+        H('<div class="sectitle"><h2>Estructura esperada</h2></div>')
+        st.code(ARBOL, language=None)
+    st.caption("¿Quieres que lea directamente una carpeta de tu disco, sin subir nada? "
+               "Eso solo puede hacerlo la versión de escritorio: descarga el proyecto y "
+               "ejecútalo con run_windows.bat en tu PC.")
+    st.stop()
+
 scan = escanear(raiz)
 if not scan['existe']:
     st.markdown(ui.css(), unsafe_allow_html=True)
     st.error(f"No existe la carpeta **{raiz}**.")
-    st.info("Elígela con el botón **📂 Examinar…** de la barra lateral, o escríbela a mano.")
+    st.info("Elígela con el botón **📂 Examinar carpeta…** de la barra lateral, "
+            "o escríbela a mano.")
     st.stop()
 if not scan['excels']:
-    st.error(f"No se encontró ningún **{C.PATRON_EXCEL}** dentro de las subcarpetas de **{raiz}**.")
-    st.info("Usa **📂 Examinar…** en la barra lateral y elige la carpeta que CONTIENE a las "
-            "cuadrillas. Estructura esperada:\n```\n" + raiz +
-            "\n├── ESTIBAS01\\\n│   ├── Resumen_NEW_VIP_ESTIBAS01.xlsx\n│   └── Adjuntos\\\n"
-            "│       └── ANEXO_12345678_type2.pdf\n└── CHOFERES DE KÍAS\\\n    └── …\n```")
+    st.error(f"No se encontró ningún **{C.PATRON_EXCEL}** dentro de las subcarpetas.")
+    st.info(("La carpeta subida no tiene la estructura esperada:"
+             if SERVIDOR else
+             "Usa **📂 Examinar carpeta…** y elige la carpeta que CONTIENE a las cuadrillas:")
+            + "\n```\n" + ARBOL + "\n```")
     st.stop()
-carpetas.recordar(raiz)
+if not SERVIDOR:
+    carpetas.recordar(raiz)
 
 sig = huella(scan)
 df_p, df_d, meta = cargar(raiz, sig)
@@ -188,7 +306,7 @@ with st.sidebar:
     st.download_button("⬇️  Descargar resultado_final.xlsx", data=excel_bytes(raiz, sig),
                        file_name=C.NOMBRE_SALIDA, **ANCHO, type="primary",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    if st.button("💾  Guardar en la carpeta raíz", **ANCHO):
+    if not SERVIDOR and st.button("💾  Guardar en la carpeta raíz", **ANCHO):
         destino = os.path.join(raiz, C.NOMBRE_SALIDA)
         try:
             with open(destino, "wb") as f:
@@ -228,7 +346,12 @@ D = df_d[df_d['DNI'].isin(set(P['DNI']))] if len(df_d) else df_d
 filtrado = bool(f_lab or f_tip or f_cua or f_ver or f_niv or solo_delitos or busca.strip())
 
 # ------------------------------------------------------------------ hero
-H(ui.hero(meta['raiz'], meta, len(P), len(D), len(df_p), len(df_d)))
+ORIGEN = (f"Carpeta subida · {st.session_state.get('etiqueta_origen', 'sin nombre')}"
+          if SERVIDOR else meta['raiz'])
+H(ui.hero(ORIGEN, meta, len(P), len(D), len(df_p), len(df_d)))
+if SERVIDOR:
+    st.caption("⚠️ App pública: cada visitante trabaja con su propia carpeta y no ve la "
+               "de los demás. Tus archivos se borran del servidor al cerrar la sesión.")
 if filtrado:
     st.info(f"Vista filtrada · **{len(P)}** de {len(df_p)} colaboradores y "
             f"**{len(D)}** de {len(df_d)} delitos en rojo. "

@@ -17,8 +17,13 @@ from __future__ import annotations
 import glob
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
+import tempfile
+import time
+import zipfile
 
 from . import config as C
 
@@ -262,6 +267,186 @@ def candidatas(base: str, limite: int = 40) -> list[str]:
         if _mide_raiz_rapido(sub):
             fuera.append(sub)
     return fuera
+
+
+# =====================================================================
+#  MODO WEB  (Streamlit Cloud u otro servidor)
+# ---------------------------------------------------------------------
+#  Un servidor web NO puede leer el disco de quien lo visita: el proceso
+#  corre en otra máquina. Ahí la carpeta del usuario llega subida desde
+#  el navegador y se trabaja sobre una copia temporal, propia de esa
+#  sesión y borrada al terminar.
+# =====================================================================
+RAIZ_TEMP = os.path.join(tempfile.gettempdir(), "filtro_web")
+VIDA_TEMP_HORAS = 6
+
+
+def modo_servidor() -> bool:
+    """
+    ¿Estamos en un servidor (Streamlit Cloud, Docker, VM sin escritorio)?
+
+    Se puede forzar con la variable de entorno FILTRO_MODO=local | web.
+    """
+    forzado = (os.environ.get("FILTRO_MODO") or "").strip().lower()
+    if forzado in ("local", "escritorio"):
+        return False
+    if forzado in ("web", "nube", "servidor", "cloud"):
+        return True
+    if os.path.isdir("/mount/src"):                 # Streamlit Community Cloud
+        return True
+    if os.environ.get("STREAMLIT_SERVER_HEADLESS", "").lower() == "true" and os.name != "nt":
+        return True
+    if os.name == "nt" or sys.platform == "darwin":  # Windows / macOS: escritorio
+        return False
+    return not (hay_explorador() and os.environ.get("DISPLAY"))
+
+
+def carpeta_sesion(token: str) -> str:
+    """Carpeta temporal privada de una sesión web."""
+    seguro = re.sub(r'[^A-Za-z0-9_-]', '', str(token))[:40] or "sesion"
+    destino = os.path.join(RAIZ_TEMP, seguro)
+    os.makedirs(destino, exist_ok=True)
+    return destino
+
+
+def limpiar_temporales(horas: int = VIDA_TEMP_HORAS) -> int:
+    """Borra las carpetas subidas hace más de `horas`. Devuelve cuántas borró."""
+    if not os.path.isdir(RAIZ_TEMP):
+        return 0
+    corte, n = time.time() - horas * 3600, 0
+    for nombre in os.listdir(RAIZ_TEMP):
+        ruta = os.path.join(RAIZ_TEMP, nombre)
+        try:
+            if os.path.isdir(ruta) and os.path.getmtime(ruta) < corte:
+                shutil.rmtree(ruta, ignore_errors=True)
+                n += 1
+        except OSError:
+            pass
+    return n
+
+
+def borrar_sesion(destino: str) -> None:
+    """Borra del servidor todo lo que subió esta sesión."""
+    destino = _normalizar(destino)
+    if destino.startswith(_normalizar(RAIZ_TEMP)) and os.path.isdir(destino):
+        shutil.rmtree(destino, ignore_errors=True)
+
+
+def _destino_seguro(base: str, nombre: str) -> str | None:
+    """Evita el «zip slip»: nada puede escribirse fuera de `base`."""
+    nombre = nombre.replace("\\", "/")
+    if nombre.startswith("/") or ".." in nombre.split("/"):
+        return None
+    ruta = os.path.normpath(os.path.join(base, *[p for p in nombre.split("/") if p]))
+    if not os.path.normpath(ruta).startswith(os.path.normpath(base)):
+        return None
+    return ruta
+
+
+EXT_PERMITIDAS = (".xlsx", ".xlsm", ".pdf")
+
+
+def extraer_zip(archivo, destino: str) -> dict:
+    """
+    Extrae el .zip que subió el usuario respetando su estructura de carpetas.
+    Solo saca Excel y PDF; ignora todo lo demás.
+    """
+    shutil.rmtree(destino, ignore_errors=True)
+    os.makedirs(destino, exist_ok=True)
+    n_ex = n_pdf = n_ign = 0
+    try:
+        with zipfile.ZipFile(archivo) as z:
+            for info in z.infolist():
+                if info.is_dir():
+                    continue
+                base = os.path.basename(info.filename)
+                if base.startswith("~$") or base.startswith("."):
+                    continue
+                ext = os.path.splitext(base)[1].lower()
+                if ext not in EXT_PERMITIDAS:
+                    n_ign += 1
+                    continue
+                ruta = _destino_seguro(destino, info.filename)
+                if not ruta:
+                    n_ign += 1
+                    continue
+                os.makedirs(os.path.dirname(ruta), exist_ok=True)
+                with z.open(info) as origen, open(ruta, "wb") as f:
+                    shutil.copyfileobj(origen, f)
+                n_ex += ext != ".pdf"
+                n_pdf += ext == ".pdf"
+    except zipfile.BadZipFile:
+        return dict(ok=False, motivo="El archivo no es un .zip válido.",
+                    excels=0, pdfs=0, ignorados=0, raiz=destino)
+    if not n_ex:
+        return dict(ok=False, excels=0, pdfs=n_pdf, ignorados=n_ign, raiz=destino,
+                    motivo=f"El .zip no trae ningún «{C.PATRON_EXCEL}».")
+    return dict(ok=True, excels=n_ex, pdfs=n_pdf, ignorados=n_ign,
+                raiz=_raiz_dentro(destino), motivo="")
+
+
+def _raiz_dentro(base: str) -> str:
+    """
+    Si al comprimir se envolvió todo en una carpeta («FILTER/ESTIBAS01/…»),
+    baja hasta el nivel donde están de verdad las cuadrillas.
+    """
+    actual = base
+    for _ in range(4):
+        if _mide_raiz_rapido(actual):
+            return actual
+        try:
+            hijos = [n for n in os.listdir(actual)
+                     if os.path.isdir(os.path.join(actual, n)) and not n.startswith(".")]
+        except OSError:
+            break
+        if len(hijos) != 1:
+            break
+        actual = os.path.join(actual, hijos[0])
+    return actual if _mide_raiz_rapido(actual) else base
+
+
+RE_CUADRILLA = re.compile(r'Resumen_NEW_VIP_(.+)', re.I)
+
+
+def guardar_sueltos(archivos, destino: str) -> dict:
+    """
+    Alternativa al .zip: el usuario selecciona los archivos a mano.
+
+    Como el navegador no manda las carpetas, la cuadrilla se deduce del nombre
+    del Excel (Resumen_NEW_VIP_<CUADRILLA>.xlsx) y todos los PDF van a una
+    carpeta «Adjuntos» común — el cruce PDF -> persona es por DNI, no por
+    carpeta, así que el resultado es el mismo.
+    """
+    shutil.rmtree(destino, ignore_errors=True)
+    os.makedirs(destino, exist_ok=True)
+    comun = os.path.join(destino, C.SUBCARPETA_PDF)
+    os.makedirs(comun, exist_ok=True)
+    n_ex = n_pdf = n_ign = 0
+    for f in archivos or []:
+        base = os.path.basename(getattr(f, "name", "") or "")
+        ext = os.path.splitext(base)[1].lower()
+        datos = f.getbuffer() if hasattr(f, "getbuffer") else f.read()
+        if ext == ".pdf":
+            with open(os.path.join(comun, base), "wb") as s:
+                s.write(datos)
+            n_pdf += 1
+        elif ext in (".xlsx", ".xlsm") and not base.startswith("~$"):
+            m = RE_CUADRILLA.match(os.path.splitext(base)[0])
+            cuad = (m.group(1) if m else os.path.splitext(base)[0]).strip() or "CUADRILLA"
+            cuad = re.sub(r'[\\/:*?"<>|]', "_", cuad)
+            carpeta = os.path.join(destino, cuad)
+            os.makedirs(carpeta, exist_ok=True)
+            nombre = base if RE_CUADRILLA.match(os.path.splitext(base)[0]) \
+                else f"Resumen_NEW_VIP_{cuad}.xlsx"
+            with open(os.path.join(carpeta, nombre), "wb") as s:
+                s.write(datos)
+            n_ex += 1
+        else:
+            n_ign += 1
+    if not n_ex:
+        return dict(ok=False, excels=0, pdfs=n_pdf, ignorados=n_ign, raiz=destino,
+                    motivo=f"Falta el «{C.PATRON_EXCEL}»: sin él no hay padrón que leer.")
+    return dict(ok=True, excels=n_ex, pdfs=n_pdf, ignorados=n_ign, raiz=destino, motivo="")
 
 
 def etiqueta(ruta: str, ancho: int = 46) -> str:

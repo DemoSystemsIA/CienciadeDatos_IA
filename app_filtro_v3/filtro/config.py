@@ -12,11 +12,26 @@ import os as _os
 
 # Carpeta que se abre por defecto. Se puede sobrescribir sin tocar el código
 # definiendo la variable de entorno FILTRO_RAIZ.
-CARPETA_POR_DEFECTO = _os.environ.get("FILTRO_RAIZ", r"C:\FILTER")
+# Fuera de Windows, C:\FILTER no significa nada (y al unirlo a otra ruta produce
+# rarezas como «/mount/src/repo/C:\FILTER»), así que se usa una ruta del sistema.
+def _carpeta_inicial() -> str:
+    env = _os.environ.get("FILTRO_RAIZ")
+    if env:
+        return env
+    if _os.name == "nt":
+        return r"C:\FILTER"
+    return _os.path.join(_os.path.expanduser("~"), "FILTER")
+
+
+CARPETA_POR_DEFECTO = _carpeta_inicial()
 PATRON_EXCEL   = "Resumen_NEW_VIP_*.xlsx"   # dentro de cada carpeta de cuadrilla
 SUBCARPETA_PDF = "Adjuntos"                 # dentro de cada carpeta de cuadrilla
 PATRON_PDF     = "*.pdf"
 NOMBRE_SALIDA  = "resultado_final.xlsx"
+
+# Límite de subida de la versión web. Debe coincidir con
+# .streamlit/config.toml -> [server] maxUploadSize.
+MAX_SUBIDA_MB  = 300
 HOJA_EXCEL     = "Hoja1"
 COL_DNI        = "DNI"
 COL_NOMBRE     = "APELLIDOS Y NOMBRES"

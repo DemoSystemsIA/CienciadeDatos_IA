@@ -11,6 +11,51 @@ Reproduce al 100% el archivo de referencia `Resumen_NEW_VIP_Filtro_3.xlsx`:
 
 ---
 
+## Dos modos: escritorio y web
+
+La app detecta sola dónde corre.
+
+| | Escritorio (tu PC) | Web (Streamlit Cloud, servidor) |
+|---|---|---|
+| Origen de los datos | Cualquier carpeta de tu disco | Una carpeta que **subes desde el navegador** |
+| Cómo se elige | Botón **📂 Examinar carpeta…**, historial, o ruta a mano | Arrastrar un `.zip`, o seleccionar los archivos sueltos |
+| Dónde viven los datos | Solo en tu PC | Copia temporal en el servidor, borrada al cerrar |
+
+**Por qué la web no puede leer `C:\FILTER`:** el proceso corre en otra máquina (un
+Linux de Streamlit), no en tu PC. Ningún servidor web puede abrir el disco de quien lo
+visita — el navegador no lo permite, y es la razón del error
+`No existe la carpeta /mount/src/<repo>/C:\FILTER`. Por eso en la nube la carpeta se
+sube, y por eso el botón *Examinar* (que usa el explorador de Windows) solo aparece en
+escritorio.
+
+La detección se puede forzar con la variable de entorno `FILTRO_MODO=local` o
+`FILTRO_MODO=web`.
+
+### Subir la carpeta en la versión web
+
+1. Ubica la carpeta que **contiene las cuadrillas**.
+2. Clic derecho -> **Enviar a** -> **Carpeta comprimida (en zip)**.
+3. Arrastra el `.zip` a la barra lateral.
+
+Si el `.zip` envuelve todo en una carpeta (`FILTER/ESTIBAS01/...`), la app baja sola
+hasta el nivel correcto. Solo se extraen `.xlsx` y `.pdf`; cualquier otra cosa se
+descarta, y las rutas que apunten fuera de la carpeta de destino (*zip slip*) se
+rechazan.
+
+Alternativa sin comprimir: **Archivos sueltos**. Se seleccionan los
+`Resumen_NEW_VIP_*.xlsx` y todos los PDF; la cuadrilla se deduce del nombre de cada
+Excel y los PDF van a una carpeta `Adjuntos` comun (el cruce PDF -> persona es por DNI,
+así que el resultado es idéntico).
+
+**Privacidad.** Cada sesión trabaja en su propia carpeta temporal y no ve la de nadie
+más; el botón *Borrar mis datos del servidor* la elimina en el acto y, si no, se limpia
+sola a las 6 horas. Aun así, una app pública en Streamlit Cloud la puede abrir cualquiera
+con el enlace: para datos reales conviene un repositorio privado y restringir los correos
+en **Settings -> Sharing** de Streamlit Cloud. El límite de subida es `MAX_SUBIDA_MB` en
+`filtro/config.py` y `maxUploadSize` en `.streamlit/config.toml` (deben coincidir).
+
+---
+
 ## Instalación (Windows)
 
 Doble clic en **`run_windows.bat`**. La primera vez crea el entorno virtual e instala
@@ -155,7 +200,8 @@ run_windows.bat
 .streamlit/config.toml  tema
 filtro/
   config.py             TODOS los criterios — es el archivo que se edita
-  carpetas.py           elección de carpeta: explorador nativo, historial y diagnóstico
+  carpetas.py           elección de carpeta: explorador nativo, historial, diagnóstico
+                        y, en la web, subida de .zip / archivos sueltos
   pdf_reader.py         detección del rojo y lectura de los reportes
   classify.py           reglas N1-N6, gravedad, vigencia, índice
   loader.py             recorre la carpeta, cruza y arma los DataFrames

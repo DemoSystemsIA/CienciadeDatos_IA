@@ -44,6 +44,14 @@ def escanear(raiz: str) -> dict:
         carpetas.append(nombre)
         excels += [(nombre, p) for p in ex if not os.path.basename(p).startswith('~$')]
         pdfs += [(nombre, p) for p in pd_]
+
+    # Reportes comunes: una carpeta «Adjuntos» colgando de la raíz vale para todos
+    # los DNI (el cruce PDF -> persona es por DNI, no por carpeta). Es lo que usa
+    # la versión web cuando se suben los archivos sueltos, sin estructura.
+    import glob as _glob
+    comunes = sorted(_glob.glob(os.path.join(raiz, C.SUBCARPETA_PDF, C.PATRON_PDF)))
+    pdfs += [("(común)", p) for p in comunes]
+
     return {'excels': excels, 'pdfs': pdfs, 'carpetas': carpetas, 'raiz': raiz, 'existe': True}
 
 

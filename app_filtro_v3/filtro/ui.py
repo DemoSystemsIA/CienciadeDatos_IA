@@ -402,6 +402,15 @@ def hero(raiz: str, meta: dict, n_personas: int = 0, n_delitos: int = 0,
 </div>"""
 
 
+def hero_vacio() -> str:
+    """Encabezado de la versión web mientras no se ha subido ninguna carpeta."""
+    return """<div class="hero">
+  <div class="heroid"><h1>Filtro de antecedentes</h1>
+    <div class="sub2">Prize · Aquanqa S.A.C. — versión web</div></div>
+  <span class="conf">Confidencial · uso interno del comité</span>
+</div>"""
+
+
 def kpi_row(items) -> str:
     """items: [(etiqueta, valor, total, color, subtitulo), ...]"""
     out = []
