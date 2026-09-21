@@ -184,3 +184,50 @@ EXTRA_MATRIZ = {
 
 # Orden de criticidad: 1 = lo más crítico. Sirve para ordenar el padrón.
 ORDEN_VEREDICTO = {v: i + 1 for i, v in enumerate(VEREDICTOS)}
+
+
+# ============================================================ temas
+# Los mismos significados con dos afinaciones: sobre papel claro los colores
+# van saturados y oscuros; sobre fondo oscuro se suben en luminosidad para que
+# mantengan contraste. Cambiar de tema reescribe estas variables del módulo,
+# así que todo lo que lea C.CRIT (tablero, gráficos, tarjetas) se adapta solo.
+TEMAS = {
+    "claro": dict(
+        BRAND="#17564A", CRIT="#C0332E", WARN="#E8A317", GOOD="#1F7A3D",
+        IDLE="#8A8F8B", OLIVE="#7E8C33", AMBAR2="#C07C11"),
+    "oscuro": dict(
+        BRAND="#3FBBA0", CRIT="#F0736A", WARN="#F5B93E", GOOD="#5FC47E",
+        IDLE="#9AA3AC", OLIVE="#B0C056", AMBAR2="#E0A73F"),
+}
+TEMA = "claro"
+
+
+def aplicar_tema(nombre: str = "claro") -> None:
+    """Reescribe la paleta del módulo según el tema elegido."""
+    global TEMA, BRAND, CRIT, WARN, GOOD, IDLE, OLIVE, AMBAR2
+    global COLOR, COLOR_NIVEL, COLOR_GRAVEDAD, COLOR_LABOR, EXTRA_MATRIZ
+    t = TEMAS.get(nombre, TEMAS["claro"])
+    TEMA = nombre if nombre in TEMAS else "claro"
+    BRAND, CRIT, WARN = t["BRAND"], t["CRIT"], t["WARN"]
+    GOOD, IDLE, OLIVE, AMBAR2 = t["GOOD"], t["IDLE"], t["OLIVE"], t["AMBAR2"]
+
+    COLOR = {"NO APTO": CRIT, "REVISION EN COMITE": WARN,
+             "APTO CON OBSERVACION": AMBAR2, "APTO": GOOD,
+             "PENDIENTE DE REPORTE": IDLE}
+    COLOR_NIVEL = {1: CRIT, 2: CRIT, 3: CRIT, 4: WARN, 5: OLIVE, 6: OLIVE}
+    COLOR_GRAVEDAD = {"GRAVE": CRIT, "MEDIO": WARN, "LEVE": OLIVE}
+    COLOR_LABOR = {"ESTIBADOR": "#2E7BB5" if TEMA == "oscuro" else "#1F5C8B",
+                   "CHOFER KIA": "#C97A4E" if TEMA == "oscuro" else "#A0522D",
+                   "PACKING": "#87A048" if TEMA == "oscuro" else "#5B6E2F",
+                   "SEGURIDAD PATRIMONIAL": "#9A81CC" if TEMA == "oscuro" else "#6B4E9E",
+                   "CHOFER BUS": "#4FA8A4" if TEMA == "oscuro" else "#2E7D7A",
+                   "CAMPO": "#BBA63C" if TEMA == "oscuro" else "#8C7A1F",
+                   "NO DEFINIDO": IDLE}
+    EXTRA_MATRIZ[SIN_OBSERVACIONES]["color"] = GOOD
+    EXTRA_MATRIZ[SIN_VERIFICAR]["color"] = IDLE
+    EXTRA_MATRIZ[SIN_OBSERVACIONES]["fg"] = "#0E1A12" if TEMA == "oscuro" else "#FFFFFF"
+    EXTRA_MATRIZ[SIN_VERIFICAR]["fg"] = "#14181C" if TEMA == "oscuro" else "#FFFFFF"
+
+
+# La paleta viva arranca en claro; el tablero la cambia si el usuario lo pide.
+aplicar_tema("claro")

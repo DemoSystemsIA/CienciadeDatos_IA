@@ -10,6 +10,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 from . import config as C
+from . import maestro as M
 
 F = "Arial"
 HDR_FILL = PatternFill("solid", fgColor="1F3864")
@@ -27,6 +28,8 @@ FILL_LABOR = {'ESTIBADOR': "DDEBF7", 'CHOFER KIA': "FCE4D6", 'PACKING': "E2EFDA"
               'CAMPO': "F1EBD2"}
 FILL_TIPO = {'PROPIO': "E2EFDA", 'TERCERO': "FFF2CC"}
 FILL_GRAV = {'GRAVE': "FFC7CE", 'MEDIO': "FFF2CC", 'LEVE': "E2EFDA"}
+FILL_PRIZE = {'ACTIVO EN PLANILLA': "E2EFDA", 'CESADO': "FFF2CC",
+              M.SIN_MATCH: "F8CBAD", 'SIN MAESTRO CARGADO': "F2F2F2"}
 
 
 def _v(x):
@@ -91,17 +94,21 @@ def construir_excel(df_p: pd.DataFrame, df_d: pd.DataFrame, meta: dict) -> bytes
                  if c not in ('CARPETAS_L', 'CATEGORIAS_L', 'JURIS_L', 'TIENE_PDF', 'NIVEL_NUM')
                  and not str(c).startswith('_')]
     orden_pref = ['DNI', C.COL_NOMBRE, 'LABOR', 'TIPO_PERSONAL', 'CARPETAS', 'PDF_ADJUNTO',
+                  'EN_PRIZE', 'ESTADO_PRIZE', 'EMPRESA', 'COD_FUNCIONARIO', 'AREA', 'CARGO',
+                  'CENTRO_COSTO', 'REGIMEN', 'TIPO_TRABAJADOR', 'PLANILLA',
+                  'FECHA_INGRESO', 'FECHA_CESE', 'ANTIGUEDAD_ANIOS', 'N_CONTRATOS',
                   'FILTRO', 'N_DELITOS', 'NIVEL_MATRIZ', 'CONCEPTO_MATRIZ', 'ACCION_MATRIZ',
                   'NIVEL_RIESGO', 'GRAVEDAD_MAX', 'CATEGORIAS', 'ANIO_MAX', 'VIGENTE',
                   'CASOS_ACTIVOS', 'DELITOS_VIGENTES', 'JURISDICCIONES', 'N_JURISDICCIONES',
                   'PROVINCIA', 'INCID_POLICIALES', 'VEREDICTO', 'INDICE', 'IDX_GRAVEDAD',
                   'IDX_VIGENCIA', 'IDX_REINCIDENCIA', 'IDX_CASO_ACTIVO', 'IDX_DISPERSION']
     resto = [c for c in base_cols if c not in orden_pref]
-    cols = resto[:1] + [c for c in orden_pref if c in base_cols] + resto[1:]
-    cols = list(dict.fromkeys(cols))
+    cols = list(dict.fromkeys([c for c in orden_pref if c in base_cols] + resto))
 
-    # ---------------- Hoja1 ----------------
-    ws = wb.create_sheet("Hoja1")
+    # ---------------- Padrón (única hoja de personas) ----------------
+    # Antes había dos hojas con las mismas filas (Hoja1 y Resumen_Persona);
+    # ahora es una sola: mismas columnas, sin duplicar el padrón.
+    ws = wb.create_sheet("Padron")
     ws.append([str(c) for c in cols])
     for _, r in df_p.iterrows():
         ws.append([_v(r.get(c)) for c in cols])
@@ -111,6 +118,15 @@ def construir_excel(df_p: pd.DataFrame, df_d: pd.DataFrame, meta: dict) -> bytes
     _pintar(ws, ci, 'TIPO_PERSONAL', FILL_TIPO)
     _pintar(ws, ci, 'NIVEL_RIESGO', FILL_RIESGO, negrita=False)
     _pintar(ws, ci, 'VEREDICTO', FILL_VER)
+    _pintar(ws, ci, 'ESTADO_PRIZE', FILL_PRIZE, negrita=False)
+    if 'INDICE' in ci:
+        for rw in range(2, ws.max_row + 1):
+            c = ws.cell(rw, ci['INDICE'])
+            v = c.value or 0
+            c.fill = PatternFill("solid", fgColor=("FF5B5B" if v >= 75 else "FFC000"
+                                                   if v >= 50 else "FFE699" if v >= 30
+                                                   else "E2EFDA"))
+            c.font = Font(F, size=10, bold=True)
     if 'ACCION_MATRIZ' in ci:
         for rw in range(2, ws.max_row + 1):
             c = ws.cell(rw, ci['ACCION_MATRIZ'])
@@ -124,14 +140,16 @@ def construir_excel(df_p: pd.DataFrame, df_d: pd.DataFrame, meta: dict) -> bytes
     if 'FILTRO' in ci:
         ws.column_dimensions[get_column_letter(ci['FILTRO'])].width = 70
     ws.auto_filter.ref = f"A1:{get_column_letter(ws.max_column)}{ws.max_row}"
+    ws.freeze_panes = "C2"
+    pi, n_per = ci, ws.max_row
 
-    # ---------------- Detalle_Delitos ----------------
+    # ---------------- Delitos ----------------
     dcols = ['DNI', 'NOMBRE', 'LABOR', 'TIPO_PERSONAL', 'DELITO', 'NIVEL', 'CONCEPTO', 'ACCION',
              'CATEGORIA', 'GRAVEDAD', 'PESO_GRAVEDAD', 'ANIO', 'VIGENTE', 'ACTIVO',
              'JURISDICCION', 'FUENTE', 'ESTADO', 'PARTE', 'ESPECIALIDAD', 'ENTIDAD', 'CASO',
              'REGLA', 'ORDEN_REPORTE']
     dcols = [c for c in dcols if c in df_d.columns]
-    ws = wb.create_sheet("Detalle_Delitos")
+    ws = wb.create_sheet("Delitos")
     ws.append(dcols)
     dv = df_d.sort_values(['NIVEL', 'NOMBRE', 'ORDEN_REPORTE']) if len(df_d) else df_d
     for _, r in dv.iterrows():
@@ -155,72 +173,16 @@ def construir_excel(df_p: pd.DataFrame, df_d: pd.DataFrame, meta: dict) -> bytes
     if 'ENTIDAD' in di:
         ws.column_dimensions[get_column_letter(di['ENTIDAD'])].width = 45
     ws.auto_filter.ref = f"A1:{get_column_letter(ws.max_column)}{ws.max_row}"
+    ws.freeze_panes = "C2"
     n_det = ws.max_row
 
-    # ---------------- Resumen_Persona ----------------
-    pcols = ['DNI', C.COL_NOMBRE, 'LABOR', 'TIPO_PERSONAL', 'CARPETAS', 'PDF_ADJUNTO',
-             'NIVEL_RIESGO', 'N_DELITOS', 'NIVEL_MATRIZ', 'ACCION_MATRIZ', 'GRAVEDAD_MAX',
-             'CATEGORIAS', 'ANIO_MAX', 'CASOS_ACTIVOS', 'N_JURISDICCIONES',
-             'INCID_POLICIALES', 'PROVINCIA', 'FILTRO', 'VEREDICTO', 'INDICE',
-             'IDX_GRAVEDAD', 'IDX_VIGENCIA', 'IDX_REINCIDENCIA', 'IDX_CASO_ACTIVO',
-             'IDX_DISPERSION']
-    pcols = [c for c in pcols if c in df_p.columns]
-    ws = wb.create_sheet("Resumen_Persona")
-    ws.append([str(c) for c in pcols])
-    for _, r in df_p.iterrows():
-        ws.append([_v(r.get(c)) for c in pcols])
-    _cabecera(ws); _cuerpo(ws)
-    pi = {str(c): i + 1 for i, c in enumerate(pcols)}
-    _pintar(ws, pi, 'LABOR', FILL_LABOR)
-    _pintar(ws, pi, 'TIPO_PERSONAL', FILL_TIPO)
-    _pintar(ws, pi, 'NIVEL_RIESGO', FILL_RIESGO, negrita=False)
-    _pintar(ws, pi, 'VEREDICTO', FILL_VER)
-    for rw in range(2, ws.max_row + 1):
-        c = ws.cell(rw, pi['INDICE'])
-        v = c.value or 0
-        c.fill = PatternFill("solid", fgColor=("FF5B5B" if v >= 75 else "FFC000" if v >= 50
-                                               else "FFE699" if v >= 30 else "E2EFDA"))
-        c.font = Font(F, size=10, bold=True)
-    _ancho(ws)
-    ws.column_dimensions[get_column_letter(pi['FILTRO'])].width = 70
-    ws.auto_filter.ref = f"A1:{get_column_letter(ws.max_column)}{ws.max_row}"
-    n_per = ws.max_row
-
-    # ---------------- Matriz_Criticidad ----------------
-    ws = wb.create_sheet("Matriz_Criticidad")
-    ws.cell(1, 1, "MATRIZ DE CRITICIDAD PRIZE / AQUANQA").font = TITLE
-    for j, v in enumerate(["NIVEL", "CONCEPTOS REFERENCIALES", "CRITICIDAD", "ACCION",
-                           "PERSONAS", "DELITOS"], 1):
-        ws.cell(3, j, v)
-    _cabecera(ws, fila=3, ncol=6)
-    cnt_p = Counter(df_p['NIVEL_NUM'].dropna().astype(int)) if len(df_p) else Counter()
-    cnt_d = Counter(df_d['NIVEL']) if len(df_d) else Counter()
-    for n in range(1, 7):
-        rw = 3 + n
-        concepto, accion, crit = C.NIVELES[n]
-        for j, v in enumerate([n, concepto, crit, accion, cnt_p.get(n, 0), cnt_d.get(n, 0)], 1):
-            c = ws.cell(rw, j, v)
-            c.font = Font(F, size=10); c.border = BOX
-            c.alignment = Alignment(vertical="center", wrap_text=(j == 2))
-        color = "FF0000" if n <= 3 else ("FFFF00" if n == 4 else "A9BE6A")
-        for j in (3, 4):
-            ws.cell(rw, j).fill = PatternFill("solid", fgColor=color)
-            ws.cell(rw, j).font = Font(F, bold=True, size=10,
-                                       color="FFFFFF" if n <= 3 else "000000")
-            ws.cell(rw, j).alignment = Alignment(horizontal="center", vertical="center")
-    notas = ["NOTA: 'PERSONAS' se asigna por el nivel MÁS CRÍTICO (menor) de cada persona.",
-             "NOTA: 'DELITOS' cuenta cada registro en rojo (una persona puede aportar varios).",
-             "NOTA: solo se evalúan registros donde la persona figura como denunciada/imputada/"
-             "sentenciada (texto ROJO). El texto gris (denunciante/agraviado) NO se computa."]
-    for k, t in enumerate(notas):
-        ws.cell(11 + k, 1, t).font = Font(F, size=9, italic=True, color="808080")
-    _ancho(ws); ws.column_dimensions['B'].width = 70
-
-    # ---------------- Estadisticas ----------------
-    ws = wb.create_sheet("Estadisticas")
-    P = "Resumen_Persona!"
+    # ---------------- Resumen (estadísticas + matriz + planilla) ----------------
+    # Antes la matriz vivía en su propia hoja repitiendo los mismos conteos que
+    # las estadísticas; ahora es una sección más de esta hoja.
+    ws = wb.create_sheet("Resumen")
+    P = "Padron!"
     pr = lambda col: f"{P}${col}$2:${col}${n_per}"
-    dr = lambda col: f"Detalle_Delitos!${col}$2:${col}${n_det}"
+    dr = lambda col: f"Delitos!${col}$2:${col}${n_det}"
     g = lambda k: get_column_letter(pi[k])
     gd = lambda k: get_column_letter(di[k])
     TOT = f"COUNTA({pr(g('DNI'))})"
@@ -348,13 +310,98 @@ def construir_excel(df_p: pd.DataFrame, df_d: pd.DataFrame, meta: dict) -> bytes
             c3 = ws.cell(r[0], 3, f'=IFERROR(B{r[0]}/COUNTIF({pr(g("LABOR"))},"{lb}"),0)')
             c3.number_format = "0.0%"; c3.font = Font(F, size=10); c3.border = BOX
             r[0] += 1
+    r[0] += 1
+
+    sec("7. MATRIZ DE CRITICIDAD")
+    head("NIVEL", "CONCEPTOS REFERENCIALES", "CRITICIDAD / ACCIÓN", "PERSONAS", "DELITOS")
+    cnt_p = Counter(df_p['NIVEL_NUM'].dropna().astype(int)) if len(df_p) else Counter()
+    cnt_d = Counter(df_d['NIVEL']) if len(df_d) else Counter()
+    for n in range(1, 7):
+        concepto, accion, crit = C.NIVELES[n]
+        color = "FF0000" if n <= 3 else ("FFFF00" if n == 4 else "A9BE6A")
+        vals = [f"N{n}", concepto, f"{crit} · {accion}", cnt_p.get(n, 0), cnt_d.get(n, 0)]
+        for j, v in enumerate(vals, 1):
+            c = ws.cell(r[0], j, v)
+            c.font = Font(F, size=10, bold=(j in (1, 4)))
+            c.border = BOX
+            c.alignment = Alignment(vertical="center", wrap_text=(j == 2))
+        for j in (1, 3):
+            ws.cell(r[0], j).fill = PatternFill("solid", fgColor=color)
+            ws.cell(r[0], j).font = Font(F, bold=True, size=10,
+                                         color="FFFFFF" if n <= 3 else "000000")
+        r[0] += 1
+    for clave, e in C.EXTRA_MATRIZ.items():
+        vals = [clave, e['concepto'], e['accion'],
+                int((df_p['VEREDICTO'] == e['veredicto']).sum()), 0]
+        for j, v in enumerate(vals, 1):
+            c = ws.cell(r[0], j, v)
+            c.font = Font(F, size=10, bold=(j in (1, 4))); c.border = BOX
+            c.alignment = Alignment(vertical="center", wrap_text=(j == 2))
+        for j in (1, 3):
+            ws.cell(r[0], j).fill = PatternFill(
+                "solid", fgColor=("A9D08E" if e['veredicto'] == 'APTO' else "D9D9D9"))
+        r[0] += 1
+    for t in ("PERSONAS se asigna por el nivel MÁS CRÍTICO (menor) de cada persona.",
+              "DELITOS cuenta cada registro en rojo: una persona puede aportar varios.",
+              "Las dos últimas filas son gente sin delitos en rojo; la columna PERSONAS "
+              "de toda la tabla suma el padrón completo."):
+        ws.cell(r[0], 1, "NOTA: " + t).font = Font(F, size=9, italic=True, color="808080")
+        r[0] += 1
+    r[0] += 1
+
+    sec("8. PLANILLA PRIZE (CRUCE POR DNI)")
+    im = meta.get('maestro') or {}
+    if not im.get('hay_maestro'):
+        ws.cell(r[0], 1, "No se cargó el maestro de funcionarios: sin cruce por DNI. "
+                         "Coloca el export de qbiz en la carpeta raíz o súbelo desde el "
+                         "tablero.").font = Font(F, size=10, italic=True, color="808080")
+        r[0] += 2
+    else:
+        head("INDICADOR", "CANT", "%")
+        line("Personas del padrón en planilla Prize",
+             f'=COUNTIF({pr(g("EN_PRIZE"))},"SI")', f'=IFERROR(B{r[0]}/{TOT},0)')
+        line(f"Personas marcadas «{M.SIN_MATCH}»",
+             f'=COUNTIF({pr(g("EN_PRIZE"))},"NO")', f'=IFERROR(B{r[0]}/{TOT},0)',
+             fill="F8CBAD")
+        line("En planilla y ACTIVO",
+             f'=COUNTIF({pr(g("ESTADO_PRIZE"))},"ACTIVO EN PLANILLA")',
+             f'=IFERROR(B{r[0]}/{TOT},0)')
+        line("En planilla y CESADO",
+             f'=COUNTIF({pr(g("ESTADO_PRIZE"))},"CESADO")', f'=IFERROR(B{r[0]}/{TOT},0)')
+        line("Filas del maestro leídas", im.get('filas_maestro', 0))
+        r[0] += 1
+        head("ÁREA (SEGÚN PLANILLA)", "PERSONAS", "% RETIRO")
+        for ar in sorted(x for x in df_p['AREA'].dropna().unique() if str(x).strip()):
+            c = ws.cell(r[0], 1, ar); c.border = BOX; c.font = Font(F, size=10, bold=True)
+            if ar == M.SIN_MATCH:
+                c.fill = PatternFill("solid", fgColor="F8CBAD")
+            c2 = ws.cell(r[0], 2, f'=COUNTIF({pr(g("AREA"))},"{ar}")')
+            c2.font = Font(F, size=10, bold=True); c2.border = BOX
+            c3 = ws.cell(r[0], 3, f'=IFERROR(COUNTIFS({pr(g("AREA"))},"{ar}",'
+                                  f'{pr(g("VEREDICTO"))},"NO APTO")/COUNTIF({pr(g("AREA"))},"{ar}"),0)')
+            c3.number_format = "0.0%"; c3.font = Font(F, size=10); c3.border = BOX
+            r[0] += 1
+        r[0] += 1
+        head("ESTADO EN PRIZE × VEREDICTO", "PERSONAS", "%")
+        for ep in sorted(x for x in df_p['ESTADO_PRIZE'].dropna().unique() if str(x).strip()):
+            for vv in C.VEREDICTOS:
+                ws.cell(r[0], 1, f"{ep} · {vv}").font = Font(F, size=10)
+                ws.cell(r[0], 1).border = BOX
+                c2 = ws.cell(r[0], 2, f'=COUNTIFS({pr(g("ESTADO_PRIZE"))},"{ep}",'
+                                      f'{pr(g("VEREDICTO"))},"{vv}")')
+                c2.font = Font(F, size=10, bold=True); c2.border = BOX
+                c2.fill = PatternFill("solid", fgColor=FILL_VER[vv])
+                c3 = ws.cell(r[0], 3, f'=IFERROR(B{r[0]}/COUNTIF({pr(g("ESTADO_PRIZE"))},"{ep}"),0)')
+                c3.number_format = "0.0%"; c3.font = Font(F, size=10); c3.border = BOX
+                r[0] += 1
+
     _ancho(ws)
     ws.column_dimensions['A'].width = 62
     ws.column_dimensions['B'].width = 14
     ws.column_dimensions['C'].width = 22
 
     # ---------------- Criterio_N1_N6 ----------------
-    ws = wb.create_sheet("Criterio_N1_N6")
+    ws = wb.create_sheet("Criterio_y_Metodo")
     ws.cell(1, 1, "CÓMO SE ASIGNA EL NIVEL N1-N6 A CADA DELITO").font = TITLE
     c = ws.cell(2, 1, "El texto del delito se normaliza (mayúsculas, sin tildes) y se evalúa contra "
                       "los patrones de abajo EN ESTE ORDEN. Gana el primero que coincide: por eso "
@@ -406,11 +453,12 @@ def construir_excel(df_p: pd.DataFrame, df_d: pd.DataFrame, meta: dict) -> bytes
     for col, w in zip("ABCDE", (12, 9, 34, 78, 20)):
         ws.column_dimensions[col].width = w
 
-    # ---------------- Fuentes_y_Metodo ----------------
-    ws = wb.create_sheet("Fuentes_y_Metodo")
-    ws.cell(1, 1, "TRAZABILIDAD DEL PROCESO").font = TITLE
+    # ---------------- Trazabilidad, en la misma hoja del criterio ----------------
+    rw += 2
+    ws.cell(rw, 1, "TRAZABILIDAD DEL PROCESO").font = TITLE
+    rw += 2
+    im = meta.get('maestro') or {}
     filas = [
-        ("", ""),
         ("Carpeta raíz", meta['raiz']),
         ("Cuadrillas detectadas", ", ".join(meta['carpetas'])),
         ("Labor / Tipo de personal",
@@ -448,17 +496,34 @@ def construir_excel(df_p: pd.DataFrame, df_d: pd.DataFrame, meta: dict) -> bytes
          "con reporte y sin delitos rojos → APTO · sin reporte → PENDIENTE DE REPORTE."),
         ("Acción matriz", "Niveles 1-3 → RETIRO · Niveles 4-6 → SE ESTUDIA SALIDA."),
         ("", ""),
+        ("", ""),
+        ("Maestro de funcionarios",
+         (f"{im.get('archivo')} — {im.get('filas_maestro', 0)} DNI únicos. "
+          f"{im.get('con_match', 0)} personas del padrón cruzaron; "
+          f"{im.get('sin_match', 0)} quedaron como «{M.SIN_MATCH}»."
+          if im.get('hay_maestro') else
+          "No cargado: las columnas de planilla quedan vacías.")),
+        ("Cómo se cruza",
+         "Por DNI, comparando solo dígitos y sin ceros a la izquierda. Si un DNI trae "
+         "varios contratos se conserva el vigente y, entre ellos, el de modificación "
+         "más reciente; N_CONTRATOS dice cuántos había."),
+        ("", ""),
+        ("Hojas de este archivo",
+         "Padron (una fila por persona) · Delitos (una fila por registro en rojo) · "
+         "Resumen (todos los conteos y la matriz) · Criterio_y_Metodo (esta hoja). "
+         "No hay datos repetidos entre hojas."),
+        ("", ""),
         ("Confidencialidad",
          "Información de uso restringido. No difundir ni comentar fuera del comité evaluador."),
     ]
     for a, b in filas:
-        ws.append([a, b])
-    for row in ws.iter_rows(min_row=2):
-        row[0].font = Font(F, size=10, bold=True)
-        row[1].font = Font(F, size=10)
-        row[1].alignment = Alignment(wrap_text=True, vertical="top")
-    ws.column_dimensions['A'].width = 42
-    ws.column_dimensions['B'].width = 105
+        ca = ws.cell(rw, 1, a); cb = ws.cell(rw, 2, b)
+        ca.font = Font(F, size=10, bold=True)
+        cb.font = Font(F, size=10)
+        cb.alignment = Alignment(wrap_text=True, vertical="top")
+        rw += 1
+    for col, w in zip("ABCDE", (42, 105, 34, 78, 20)):
+        ws.column_dimensions[col].width = w
 
     buf = io.BytesIO()
     wb.save(buf)

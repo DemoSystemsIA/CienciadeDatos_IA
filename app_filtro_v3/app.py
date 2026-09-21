@@ -12,9 +12,10 @@ import datetime as dt
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from filtro import config as C
-from filtro import carpetas, charts, ui
+from filtro import carpetas, charts, maestro, ui
 from filtro.loader import construir, escanear, firma as huella
 from filtro.excel_export import construir_excel
 from filtro.validate import validar
@@ -32,8 +33,53 @@ ANCHO = {'width': 'stretch'} if _ver(st.__version__) >= (1, 49) else {'use_conta
 
 st.set_page_config(page_title="Filtro de Antecedentes · Prize", page_icon="🛡️",
                    layout="wide", initial_sidebar_state="expanded")
+
+# ------------------------------------------------------------------ tema
+# Claro / oscuro con un botón. La paleta vive en config, ui y charts: se les
+# aplica ANTES de pintar nada para que todo salga del mismo tema.
+if st.session_state.get("tema") not in ("claro", "oscuro"):
+    st.session_state["tema"] = "claro"
+TEMA = st.session_state["tema"]
+C.aplicar_tema(TEMA)
+ui.aplicar_tema(TEMA)
+charts.aplicar_tema(TEMA)
+
 st.markdown(ui.css(), unsafe_allow_html=True)
 H = lambda s: st.markdown(ui.tight(s), unsafe_allow_html=True)   # noqa: E731
+
+
+def seg(nombre: str):
+    """Contenedor con aspecto de control segmentado (pestañas pequeñas)."""
+    try:
+        return st.container(key=f"seg_{nombre}")
+    except TypeError:                      # Streamlit antiguo: sin key
+        return st.container()
+
+
+def selector_de_carpeta_js():
+    """
+    Convierte el cargador de la barra lateral en un SELECTOR DE CARPETA.
+
+    El navegador no deja leer rutas del disco, pero sí dejar elegir una carpeta
+    entera (atributo webkitdirectory) y mandar su contenido. Streamlit no expone
+    ese atributo, así que se lo añadimos al input desde el propio navegador.
+    """
+    components.html("""<script>
+const doc = window.parent.document;
+function marcar() {
+  doc.querySelectorAll('section[data-testid="stSidebar"] input[type="file"]')
+     .forEach(function (i) {
+        if (!i.hasAttribute('webkitdirectory')) {
+          i.setAttribute('webkitdirectory', '');
+          i.setAttribute('directory', '');
+          i.setAttribute('mozdirectory', '');
+          i.setAttribute('multiple', '');
+        }
+     });
+}
+marcar();
+setInterval(marcar, 400);
+</script>""", height=0)
 
 
 # ------------------------------------------------------------------ datos
@@ -96,8 +142,10 @@ def panel_web() -> str:
       'puede abrir tus discos. Elige tu carpeta desde el navegador y se procesa al '
       'momento: lo que subas es solo de esta sesión y se borra sola.</div>')
 
-    modo = st.radio("Cómo subir", ["Carpeta en .zip", "Archivos sueltos"],
-                    horizontal=True, key="modo_carga", label_visibility="collapsed")
+    with seg("carga"):
+        modo = st.radio("Cómo subir",
+                        ["📁 Carpeta", "🗜️ .zip", "📄 Archivos"],
+                        horizontal=True, key="modo_carga", label_visibility="collapsed")
 
     def _cargar(firma, fn, etiqueta):
         if st.session_state.get("_firma_carga") == firma:
@@ -109,7 +157,23 @@ def panel_web() -> str:
         st.session_state["etiqueta_origen"] = etiqueta
         st.session_state["raiz_actual"] = rep["raiz"] if rep["ok"] else ""
 
-    if modo == "Carpeta en .zip":
+    if modo.endswith("Carpeta"):
+        st.caption("Elige la carpeta de tu PC: el navegador manda su contenido "
+                   "(Excel y PDF). No se comprime nada.")
+        fs = st.file_uploader(
+            "Elegir carpeta", accept_multiple_files=True, key="up_dir",
+            label_visibility="collapsed",
+            help="Se abrirá el selector de carpetas del navegador. Elige la carpeta "
+                 "que contiene las cuadrillas y acepta el aviso de «subir varios "
+                 "archivos».")
+        selector_de_carpeta_js()
+        if fs:
+            utiles = [f for f in fs
+                      if f.name.lower().endswith((".xlsx", ".xlsm", ".pdf", ".csv"))]
+            _cargar(("carpeta", tuple(sorted((f.name, f.size) for f in utiles))),
+                    lambda: carpetas.guardar_sueltos(utiles, destino),
+                    f"carpeta · {len(utiles)} archivos")
+    elif modo.endswith(".zip"):
         z = st.file_uploader(
             "Sube tu carpeta comprimida", type=["zip"], key="up_zip",
             help="En Windows: clic derecho sobre la carpeta (la que contiene las "
@@ -119,10 +183,11 @@ def panel_web() -> str:
                     lambda: carpetas.extraer_zip(z, destino), z.name)
     else:
         fs = st.file_uploader(
-            "Sube los Excel y los PDF", type=["xlsx", "xlsm", "pdf"],
+            "Sube los Excel y los PDF", type=["xlsx", "xlsm", "pdf", "csv"],
             accept_multiple_files=True, key="up_files",
-            help="Selecciona los Resumen_NEW_VIP_*.xlsx y todos los PDF de Adjuntos. "
-                 "La cuadrilla se deduce del nombre de cada Excel.")
+            help="Selecciona los Resumen_NEW_VIP_*.xlsx, los PDF de Adjuntos y, si lo "
+                 "tienes, el export de funcionarios. La cuadrilla se deduce del "
+                 "nombre de cada Excel.")
         if fs:
             _cargar(("sueltos", tuple(sorted((f.name, f.size) for f in fs))),
                     lambda: carpetas.guardar_sueltos(fs, destino),
@@ -131,7 +196,8 @@ def panel_web() -> str:
     rep = st.session_state.get("_rep_carga")
     if rep and rep["ok"]:
         st.caption(f"✅ {rep['excels']} Excel · {rep['pdfs']} PDF"
-                   + (f" · {rep['ignorados']} archivos ignorados" if rep["ignorados"] else ""))
+                   + (" · maestro de planilla" if rep.get("maestros") else "")
+                   + (f" · {rep['ignorados']} ignorados" if rep["ignorados"] else ""))
     elif rep:
         st.error(rep["motivo"])
 
@@ -139,7 +205,7 @@ def panel_web() -> str:
         if st.button("🗑️  Borrar mis datos del servidor", **ANCHO, key="btn_borrar"):
             carpetas.borrar_sesion(destino)
             for k in ("raiz_actual", "_firma_carga", "_rep_carga", "etiqueta_origen",
-                      "up_zip", "up_files"):
+                      "up_zip", "up_files", "up_dir"):
                 st.session_state.pop(k, None)
             st.rerun()
 
@@ -152,15 +218,23 @@ def panel_web() -> str:
 
 # ---------------------------------------------------------------- sidebar
 with st.sidebar:
-    H('<div style="display:flex;align-items:center;gap:9px;margin-bottom:2px">'
-      '<div style="width:26px;height:26px;border-radius:7px;background:#17564A;display:grid;'
-      'place-items:center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" '
-      'stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">'
-      '<path d="M20 6 9 17l-5-5"/></svg></div>'
-      '<div><div style="font-family:Archivo;font-weight:700;font-size:14px;line-height:1.1">'
-      'Filtro de Antecedentes</div>'
-      '<div style="font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:#7C847F">'
-      'Prize · Aquanqa S.A.C.</div></div></div>')
+    _l, _t = st.columns([1, .3])
+    with _l:
+        H(f'<div style="display:flex;align-items:center;gap:9px;margin-bottom:2px">'
+          f'<div style="width:26px;height:26px;border-radius:7px;background:{C.BRAND};'
+          'display:grid;place-items:center"><svg width="15" height="15" viewBox="0 0 24 24" '
+          'fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" '
+          'stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>'
+          '<div><div style="font-family:Archivo;font-weight:700;font-size:14px;line-height:1.1">'
+          'Filtro de Antecedentes</div>'
+          '<div style="font-size:10px;letter-spacing:.07em;text-transform:uppercase;'
+          'color:var(--muted)">Prize · Aquanqa S.A.C.</div></div></div>')
+    with _t:
+        if st.button("🌙" if TEMA == "claro" else "☀️", key="btn_tema", **ANCHO,
+                     help=("Cambiar a modo oscuro" if TEMA == "claro"
+                           else "Cambiar a modo claro")):
+            st.session_state["tema"] = "oscuro" if TEMA == "claro" else "claro"
+            st.rerun()
     st.divider()
 
     raiz = st.session_state["raiz_actual"]
@@ -299,8 +373,61 @@ with st.sidebar:
     f_ver = st.multiselect("Veredicto", C.VEREDICTOS, default=[], placeholder="Todos")
     f_niv = st.multiselect("Nivel matriz", [f"N{n}" for n in range(1, 7)], default=[],
                            placeholder="Todos")
+    # ---- filtros de planilla (solo si hay maestro cruzado) ----
+    IM = meta.get('maestro') or {}
+    HAY_MAESTRO = bool(IM.get('hay_maestro'))
+    f_area, f_emp, f_est = [], [], []
+    if HAY_MAESTRO:
+        _areas = sorted(a for a in df_p['AREA'].dropna().unique() if str(a).strip())
+        _emps = sorted(e for e in df_p['EMPRESA'].dropna().unique() if str(e).strip())
+        _ests = sorted(e for e in df_p['ESTADO_PRIZE'].dropna().unique() if str(e).strip())
+        f_area = st.multiselect("Área (planilla)", _areas, default=[], placeholder="Todas")
+        f_emp = st.multiselect("Empresa", _emps, default=[], placeholder="Todas")
+        f_est = st.multiselect("Situación en Prize", _ests, default=[], placeholder="Todas")
     solo_delitos = st.checkbox("Solo con delitos en rojo", value=False)
+    solo_fuera = st.checkbox(f"Solo «{maestro.SIN_MATCH.lower()}»", value=False,
+                             disabled=not HAY_MAESTRO,
+                             help="Personas del padrón que no aparecen en el maestro.")
     busca = st.text_input("Buscar nombre o DNI", "", placeholder="nombre o DNI…")
+
+    # ---- maestro de funcionarios ----
+    st.divider()
+    H('<div class="ptit">Maestro de planilla</div>')
+    if HAY_MAESTRO:
+        st.caption(f"✅ {IM.get('archivo')} · {ui.num(IM.get('filas_maestro', 0))} DNI · "
+                   f"{IM.get('con_match', 0)} cruzaron, {IM.get('sin_match', 0)} fuera")
+    elif IM.get('error'):
+        st.error(f"No se pudo leer el maestro. {IM['error']}")
+    else:
+        st.caption("Sin maestro: súbelo para saber quién está en planilla.")
+    with st.expander("Cargar maestro de funcionarios"):
+        _mf = st.file_uploader("Export de funcionarios (.csv / .xlsx)",
+                               type=["csv", "xlsx", "xlsm"], key="up_maestro",
+                               label_visibility="collapsed",
+                               help="El export de qbiz con la columna payload en JSON. "
+                                    "Se guarda en la carpeta de trabajo y se usa en cada "
+                                    "recarga.")
+        if _mf is not None:
+            _firma_m = (_mf.name, _mf.size)
+            if st.session_state.get("_firma_maestro") != _firma_m:
+                try:
+                    _dst = os.path.join(raiz, ".cache_filtro", maestro.NOMBRE_GUARDADO)
+                    os.makedirs(os.path.dirname(_dst), exist_ok=True)
+                    with open(_dst, "wb") as _f:
+                        _f.write(_mf.getbuffer())
+                    st.session_state["_firma_maestro"] = _firma_m
+                    st.cache_data.clear()
+                    st.rerun()
+                except OSError as e:
+                    st.error(f"No se pudo guardar: {e}")
+        if HAY_MAESTRO and st.button("Quitar maestro", **ANCHO, key="btn_quitar_maestro"):
+            try:
+                os.remove(os.path.join(raiz, ".cache_filtro", maestro.NOMBRE_GUARDADO))
+            except OSError:
+                pass
+            st.session_state.pop("_firma_maestro", None)
+            st.cache_data.clear()
+            st.rerun()
 
     st.divider()
     st.download_button("⬇️  Descargar resultado_final.xlsx", data=excel_bytes(raiz, sig),
@@ -332,8 +459,16 @@ def aplicar(df):
         m &= df['VEREDICTO'].isin(f_ver)
     if f_niv:
         m &= df['NIVEL_MATRIZ'].isin(f_niv)
+    if f_area:
+        m &= df['AREA'].isin(f_area)
+    if f_emp:
+        m &= df['EMPRESA'].isin(f_emp)
+    if f_est:
+        m &= df['ESTADO_PRIZE'].isin(f_est)
     if solo_delitos:
         m &= df['N_DELITOS'] > 0
+    if solo_fuera:
+        m &= df['EN_PRIZE'] == 'NO'
     if busca.strip():
         q = busca.strip().lower()
         m &= (df[C.COL_NOMBRE].str.lower().str.contains(q, na=False) |
@@ -343,7 +478,8 @@ def aplicar(df):
 
 P = aplicar(df_p)
 D = df_d[df_d['DNI'].isin(set(P['DNI']))] if len(df_d) else df_d
-filtrado = bool(f_lab or f_tip or f_cua or f_ver or f_niv or solo_delitos or busca.strip())
+filtrado = bool(f_lab or f_tip or f_cua or f_ver or f_niv or f_area or f_emp or f_est
+                or solo_delitos or solo_fuera or busca.strip())
 
 # ------------------------------------------------------------------ hero
 ORIGEN = (f"Carpeta subida · {st.session_state.get('etiqueta_origen', 'sin nombre')}"
@@ -368,14 +504,28 @@ H(ui.kpi_row([
     ("Sin verificar", int(v.get('PENDIENTE DE REPORTE', 0)), len(P), C.IDLE,
      "no tienen PDF en la carpeta Adjuntos")]))
 
+if HAY_MAESTRO:
+    _fuera = int((P['EN_PRIZE'] == 'NO').sum())
+    H(ui.tira_planilla([
+        ("En planilla Prize", int((P['EN_PRIZE'] == 'SI').sum()),
+         f"{(P['EN_PRIZE'] == 'SI').mean() * 100:.0f}% del grupo", C.BRAND),
+        ("Activos", int((P['ESTADO_PRIZE'] == 'ACTIVO EN PLANILLA').sum()),
+         "vigentes en planilla", C.GOOD),
+        ("Cesados", int((P['ESTADO_PRIZE'] == 'CESADO').sum()),
+         "ya no trabajan aquí", C.WARN),
+        (maestro.SIN_MATCH, _fuera,
+         "no cruzan con el maestro", C.CRIT),
+        ("Áreas distintas", int(P.loc[P['EN_PRIZE'] == 'SI', 'AREA'].nunique()),
+         "según planilla", C.IDLE)]))
+
 st.write("")
 
 # ------------------------------------------------- navegación persistente
 # Con st.tabs, cualquier filtro (buscar un DNI, marcar una cuadrilla…) hace
 # que Streamlit reejecute el script y la vista volvía siempre a «Resumen».
 # Guardando la sección en session_state, uno se queda donde estaba.
-SECCIONES = ["Resumen", "Propio vs tercero", "Matriz y categorías", "Vigencia",
-             "Padrón", "Criterio N1-N6", "Trazabilidad"]
+SECCIONES = ["Resumen", "Planilla Prize", "Propio vs tercero", "Matriz y categorías",
+             "Vigencia", "Padrón", "Criterio N1-N6", "Trazabilidad"]
 if st.session_state.get("seccion") not in SECCIONES:
     st.session_state["seccion"] = SECCIONES[0]
 try:
@@ -464,6 +614,91 @@ if seccion == "Resumen":
                     otros.sort_values(['INDICE', 'N_DELITOS'], ascending=False), D))
 
 # ====================================================== PROPIO VS TERCERO
+elif seccion == "Planilla Prize":
+    if not HAY_MAESTRO:
+        H('<div class="sectitle"><h2>Planilla Prize</h2>'
+          '<p>Cruce del padrón con el maestro de funcionarios, por DNI.</p></div>')
+        st.info("Todavía no hay maestro cargado. Súbelo en la barra lateral "
+                "(**Planilla Prize → Cargar maestro de funcionarios**) o deja el export "
+                "de qbiz dentro de la carpeta de trabajo: el tablero lo detecta solo.",
+                icon="📇")
+        st.caption("Sirve cualquier .csv/.xlsx con una columna DNI, con los campos sueltos "
+                   "o dentro de un JSON en una columna payload.")
+    else:
+        _fuera = P[P['EN_PRIZE'] == 'NO']
+        H('<div class="sectitle"><h2>Quién es cada DNI dentro de Prize</h2>'
+          f'<p>Cruce por DNI contra {ui.num(IM.get("filas_maestro", 0))} funcionarios. '
+          'Si el DNI no está en el maestro se marca '
+          f'<b>{maestro.SIN_MATCH.lower()}</b>: casi siempre es personal de contrata.</p>'
+          f'<span class="acount">{len(_fuera)} de {len(P)} no cruzan</span></div>')
+
+        c1, c2 = st.columns([1.25, 1], gap="medium")
+        with c1, st.container(border=True):
+            H('<div class="ptit">Veredicto por área de planilla</div>'
+              '<div class="psub">cada barra es un área; el color, la decisión</div>')
+            ch = charts.planilla(P, 'AREA')
+            if ch is not None:
+                st.altair_chart(ch, **ANCHO)
+            else:
+                st.info("Sin áreas que mostrar en esta selección.")
+        with c2, st.container(border=True):
+            H('<div class="ptit">Situación en la empresa</div>'
+              '<div class="psub">sobre las ' + ui.num(len(P)) + ' personas filtradas</div>'
+              + ui.señales([
+                  ("Activos en planilla con delito en rojo",
+                   int(((P['ESTADO_PRIZE'] == 'ACTIVO EN PLANILLA') &
+                        (P['N_DELITOS'] > 0)).sum()), len(P), "personas", C.CRIT),
+                  ("Activos en planilla y NO APTO",
+                   int(((P['ESTADO_PRIZE'] == 'ACTIVO EN PLANILLA') &
+                        (P['VEREDICTO'] == 'NO APTO')).sum()), len(P), "personas", C.CRIT),
+                  ("Cesados (ya no son un riesgo activo)",
+                   int((P['ESTADO_PRIZE'] == 'CESADO').sum()), len(P), "personas", C.WARN),
+                  (f"{maestro.SIN_MATCH} — revisar contrata",
+                   len(_fuera), len(P), "personas", C.WARN),
+                  ("Con más de un contrato en el maestro",
+                   int((pd.to_numeric(P['N_CONTRATOS'], errors='coerce') > 1).sum()),
+                   len(P), "personas", C.IDLE)]))
+
+        st.write("")
+        c1, c2 = st.columns(2, gap="medium")
+        with c1, st.container(border=True):
+            H('<div class="ptit">Cargos más frecuentes</div>'
+              '<div class="psub">según el maestro, teñidos por veredicto</div>')
+            ch = charts.planilla(P[P['EN_PRIZE'] == 'SI'], 'CARGO', top=10)
+            if ch is not None:
+                st.altair_chart(ch, **ANCHO)
+            else:
+                st.info("Sin cargos que mostrar en esta selección.")
+        with c2, st.container(border=True):
+            H('<div class="ptit">Empresa y régimen</div>'
+              '<div class="psub">composición del grupo filtrado</div>')
+            _t = (P[P['EN_PRIZE'] == 'SI']
+                  .groupby(['EMPRESA', 'TIPO_TRABAJADOR']).size()
+                  .reset_index(name='Personas').sort_values('Personas', ascending=False))
+            if len(_t):
+                st.dataframe(_t, hide_index=True, **ANCHO,
+                             height=min(360, 38 * len(_t) + 40))
+            else:
+                st.info("Nadie del grupo filtrado está en el maestro.")
+
+        st.write("")
+        H('<div class="sectitle"><h2>Detalle por persona</h2>'
+          '<p>El padrón con los campos que aporta la planilla.</p></div>')
+        _cols = ['DNI', C.COL_NOMBRE, 'LABOR', 'ESTADO_PRIZE', 'EMPRESA', 'COD_FUNCIONARIO',
+                 'AREA', 'CARGO', 'CENTRO_COSTO', 'REGIMEN', 'TIPO_TRABAJADOR', 'PLANILLA',
+                 'FECHA_INGRESO', 'FECHA_CESE', 'ANTIGUEDAD_ANIOS', 'N_CONTRATOS',
+                 'N_DELITOS', 'NIVEL_MATRIZ', 'INDICE', 'VEREDICTO']
+        _cols = [c for c in _cols if c in P.columns]
+        _vis = P.sort_values(['EN_PRIZE', 'INDICE'], ascending=[True, False])[_cols]
+        st.dataframe(_vis, hide_index=True, **ANCHO, height=430,
+                     column_config={"INDICE": st.column_config.ProgressColumn(
+                         "Índice", min_value=0, max_value=100, format="%d"),
+                         "ANTIGUEDAD_ANIOS": st.column_config.NumberColumn(
+                             "Antigüedad", format="%.1f años")})
+        st.download_button("⬇️  Descargar el cruce con planilla (CSV)",
+                           _vis.to_csv(index=False).encode('utf-8-sig'),
+                           "padron_con_planilla.csv", "text/csv", key="dl_planilla")
+
 elif seccion == "Propio vs tercero":
     H('<div class="sectitle"><h2>La misma lupa sobre cada población</h2>'
       '<p>Las contratas (choferes de kías y de buses) y la planilla propia '
@@ -503,8 +738,9 @@ elif seccion == "Propio vs tercero":
     st.write("")
     H('<div class="sectitle"><h2>Composición</h2>'
       '<p>La franja gris es el punto ciego: gente sin reporte adjunto.</p></div>')
-    eje = st.radio("Desagregar por", ["Labor", "Tipo de personal", "Cuadrilla"],
-                   horizontal=True, label_visibility="collapsed", key="eje_composicion")
+    with seg("eje"):
+        eje = st.radio("Desagregar por", ["Labor", "Tipo de personal", "Cuadrilla"],
+                       horizontal=True, label_visibility="collapsed", key="eje_composicion")
     campo = {"Labor": "LABOR", "Tipo de personal": "TIPO_PERSONAL"}.get(eje)
     if campo is None:
         base = P.explode('CARPETAS_L').rename(columns={'CARPETAS_L': 'CUADRILLA'})
@@ -647,7 +883,7 @@ elif seccion == "Padrón":
              "Nombre", "DNI", "Labor", "Cuadrilla"],
             index=0, key="orden_padron",
             help="Criterio principal de ordenamiento del cuadro.")
-    with c3:
+    with c3, seg("sentido"):
         sentido = st.radio(
             "Sentido", ["Desc ↓", "Asc ↑"], index=0, horizontal=True, key="sentido_padron",
             help="Desc ↓ = lo más crítico primero. Asc ↑ = el orden exactamente invertido.")

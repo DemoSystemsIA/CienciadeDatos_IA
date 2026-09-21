@@ -14,10 +14,20 @@ from . import config as C
 
 FONT = '"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif'
 FONT_NUM = '"IBM Plex Mono", ui-monospace, monospace'
-GRID = "#E4E3DB"
-AXIS = "#7C847F"
-INK = "#14171A"
-INK2 = "#4A524E"
+
+TEMAS = {
+    "claro":  dict(GRID="#E4E3DB", AXIS="#7C847F", INK="#14171A", INK2="#4A524E"),
+    "oscuro": dict(GRID="#2C3540", AXIS="#8E98A2", INK="#EDF1F4", INK2="#C3CBD3"),
+}
+GRID, AXIS = TEMAS["claro"]["GRID"], TEMAS["claro"]["AXIS"]
+INK, INK2 = TEMAS["claro"]["INK"], TEMAS["claro"]["INK2"]
+
+
+def aplicar_tema(nombre: str = "claro") -> None:
+    """Ejes, rejilla y textos de los gráficos según el tema activo."""
+    global GRID, AXIS, INK, INK2
+    t = TEMAS.get(nombre, TEMAS["claro"])
+    GRID, AXIS, INK, INK2 = t["GRID"], t["AXIS"], t["INK"], t["INK2"]
 
 
 def _base(ch, h):
@@ -69,7 +79,7 @@ def niveles_matriz(df_p: pd.DataFrame, df_d: pd.DataFrame):
                              axis=alt.Axis(grid=True, tickCount=5)),
                      y=y, color=alt.Color('color:N', scale=None, legend=None), tooltip=tip))
     txt = (alt.Chart(d).mark_text(align='left', dx=7, fontSize=13, font=FONT,
-                                  fontWeight='bold', color=INK)
+                                  fontWeight='bold', color=INK)  # noqa: usa el tema activo
            .encode(x='Personas:Q', y=y, text='Personas:Q'))
     return _base((fondo + barra + txt), 30 * len(d) + 55)
 
@@ -183,3 +193,34 @@ def dispersion_indice(df_p: pd.DataFrame):
                       tooltip=[alt.Tooltip(C.COL_NOMBRE, title='Colaborador'), 'DNI', 'LABOR',
                                'NIVEL_MATRIZ', 'INDICE', 'N_DELITOS', 'Último año', 'VEREDICTO']))
     return _base(fondo + puntos, 360)
+
+
+# ------------------------------------------------- planilla Prize
+def planilla(df_p: pd.DataFrame, campo: str = "AREA", top: int = 12):
+    """Personas por área/cargo de planilla, teñidas por veredicto."""
+    if campo not in df_p.columns or not len(df_p):
+        return None
+    d = df_p[[campo, 'VEREDICTO']].copy()
+    d[campo] = d[campo].replace("", "SIN DATO").fillna("SIN DATO")
+    grandes = d[campo].value_counts().head(top).index.tolist()
+    d = d[d[campo].isin(grandes)]
+    g = d.groupby([campo, 'VEREDICTO']).size().reset_index(name='Personas')
+    if not len(g):
+        return None
+    g['_ord'] = g['VEREDICTO'].map({v: i for i, v in enumerate(C.VEREDICTOS)})
+    tot = d[campo].value_counts()
+    g['Total'] = g[campo].map(tot)
+    y = alt.Y(f'{campo}:N', sort=grandes, title=None,
+              axis=alt.Axis(labelLimit=210, labelFontSize=11.5, labelColor=INK2,
+                            domain=False, ticks=False))
+    col = alt.Color('VEREDICTO:N', title=None,
+                    scale=alt.Scale(domain=C.VEREDICTOS,
+                                    range=[C.COLOR[v] for v in C.VEREDICTOS]),
+                    legend=alt.Legend(orient='bottom', columns=2, labelLimit=220,
+                                      symbolSize=90, labelFontSize=11))
+    barra = (alt.Chart(g).mark_bar(cornerRadius=3, height=16)
+             .encode(x=alt.X('Personas:Q', stack='zero', title='personas'), y=y, color=col,
+                     order=alt.Order('_ord:Q', sort='ascending'),
+                     tooltip=[alt.Tooltip(f'{campo}:N', title=campo.title()),
+                              'VEREDICTO', 'Personas', 'Total']))
+    return _base(barra, max(230, 26 * len(grandes) + 70))

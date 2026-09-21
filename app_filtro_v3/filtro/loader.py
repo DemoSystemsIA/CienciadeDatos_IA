@@ -17,6 +17,7 @@ import pandas as pd
 import openpyxl
 
 from . import config as C
+from . import maestro as M
 from .pdf_reader import parse_pdf
 from .classify import (clasificar, gravedad, caso_activo, anio, labor_personas,
                        indice_riesgo, nivel_riesgo, veredicto)
@@ -52,13 +53,15 @@ def escanear(raiz: str) -> dict:
     comunes = sorted(_glob.glob(os.path.join(raiz, C.SUBCARPETA_PDF, C.PATRON_PDF)))
     pdfs += [("(común)", p) for p in comunes]
 
-    return {'excels': excels, 'pdfs': pdfs, 'carpetas': carpetas, 'raiz': raiz, 'existe': True}
+    return {'excels': excels, 'pdfs': pdfs, 'carpetas': carpetas, 'raiz': raiz,
+            'maestro': M.localizar(raiz), 'existe': True}
 
 
 def firma(scan: dict) -> str:
     """Huella de la carpeta: cambia si se agrega, quita o modifica cualquier archivo."""
     h = hashlib.sha1()
-    for _, p in scan['excels'] + scan['pdfs']:
+    sueltos = [(None, scan['maestro'])] if scan.get('maestro') else []
+    for _, p in scan['excels'] + scan['pdfs'] + sueltos:
         try:
             st = os.stat(p)
             h.update(f"{p}|{int(st.st_mtime)}|{st.st_size}".encode('utf-8', 'ignore'))
@@ -276,6 +279,18 @@ def construir(raiz: str, progreso=None):
     if 'ANIO' in df_d.columns and len(df_d):
         df_d['ANIO'] = pd.array(df_d['ANIO'], dtype='Int64')
 
+    # ---- 4. Cruce con el maestro de funcionarios de Prize ----
+    ruta_m = scan.get('maestro')
+    maestro_df, err_maestro = None, ""
+    if ruta_m:
+        try:
+            maestro_df = M.cargar(ruta_m)
+        except Exception as e:                      # archivo raro: seguimos sin él
+            err_maestro = f"{os.path.basename(ruta_m)}: {e}"
+    df_p, info_maestro = M.aplicar(df_p, maestro_df)
+    info_maestro['archivo'] = os.path.basename(ruta_m) if ruta_m else ""
+    info_maestro['error'] = err_maestro
+
     orden = {v: i for i, v in enumerate(C.VEREDICTOS)}
     df_p = df_p.sort_values(
         by=['VEREDICTO', 'INDICE', C.COL_NOMBRE],
@@ -290,6 +305,7 @@ def construir(raiz: str, progreso=None):
         dni_repetidos=filas_excel - len(personas),
         con_pdf=int(df_p['TIENE_PDF'].sum()), sin_pdf=int((~df_p['TIENE_PDF']).sum()),
         pdfs_huerfanos=sorted(dnis_pdf - set(personas)),
+        maestro=info_maestro,
         firma=firma(scan),
     )
     return df_p, df_d, meta

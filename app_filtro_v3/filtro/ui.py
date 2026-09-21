@@ -12,49 +12,105 @@ import html as _html
 import pandas as pd
 
 from . import config as C
+from . import maestro as M
 
 # --------------------------------------------------------------- paleta
-PAPER = "#F4F3EE"
-SURFACE = "#FCFCFA"
-SURFACE2 = "#EFEEE8"
-INK = "#14171A"
-INK2 = "#4A524E"
-MUTED = "#7C847F"
-RULE = "#DCDBD2"
-RULE_SOFT = "#E9E8E1"
+# Dos afinaciones del mismo lenguaje visual. aplicar_tema() reescribe estas
+# variables del módulo y todo lo que las lea (tarjetas, padrón, leyendas)
+# cambia con ellas.
+TEMAS = {
+    "claro": dict(PAPER="#F4F3EE", SURFACE="#FCFCFA", SURFACE2="#EFEEE8",
+                  INK="#14171A", INK2="#4A524E", MUTED="#7C847F",
+                  RULE="#DCDBD2", RULE_SOFT="#E9E8E1",
+                  SOMBRA="0 1px 2px rgba(20,23,26,.05), 0 6px 20px -14px rgba(20,23,26,.22)",
+                  VELO="rgba(255,255,255,.55)", ALFA=1.0),
+    "oscuro": dict(PAPER="#11151A", SURFACE="#191F26", SURFACE2="#222A33",
+                   INK="#EDF1F4", INK2="#C3CBD3", MUTED="#8E98A2",
+                   RULE="#2D3742", RULE_SOFT="#242C35",
+                   SOMBRA="0 1px 2px rgba(0,0,0,.5), 0 10px 28px -18px rgba(0,0,0,.9)",
+                   VELO="rgba(255,255,255,.035)", ALFA=1.7),
+}
+TEMA = "claro"
+PAPER = TEMAS["claro"]["PAPER"]
+SURFACE = TEMAS["claro"]["SURFACE"]
+SURFACE2 = TEMAS["claro"]["SURFACE2"]
+INK = TEMAS["claro"]["INK"]
+INK2 = TEMAS["claro"]["INK2"]
+MUTED = TEMAS["claro"]["MUTED"]
+RULE = TEMAS["claro"]["RULE"]
+RULE_SOFT = TEMAS["claro"]["RULE_SOFT"]
+SOMBRA = TEMAS["claro"]["SOMBRA"]
+VELO = TEMAS["claro"]["VELO"]
+ALFA = 1.0
 
-# tinte de fila y riel por veredicto  (fondo, riel, texto de la píldora, fondo píldora)
-VEREDICTO_ESTILO = {
-    "NO APTO":              dict(fondo="rgba(192,51,46,.13)",  riel="#C0332E",
-                                 pill_bg="#C0332E", pill_fg="#FFFFFF"),
-    "REVISION EN COMITE":   dict(fondo="rgba(232,163,23,.16)", riel="#E8A317",
-                                 pill_bg="#E8A317", pill_fg="#221704"),
-    "APTO CON OBSERVACION": dict(fondo="rgba(232,163,23,.07)", riel="#C07C11",
-                                 pill_bg="rgba(232,163,23,.20)", pill_fg="#8A5A05"),
-    "APTO":                 dict(fondo="rgba(31,122,61,.09)",  riel="#1F7A3D",
-                                 pill_bg="rgba(31,122,61,.16)", pill_fg="#166030"),
-    "PENDIENTE DE REPORTE": dict(fondo="rgba(138,143,139,.12)", riel="#8A8F8B",
-                                 pill_bg="rgba(138,143,139,.18)", pill_fg="#565B57"),
-}
-LABOR_ESTILO = {
-    "ESTIBADOR":             dict(bg="#DCE9F4", fg="#164C77"),
-    "CHOFER KIA":            dict(bg="#F6E3D8", fg="#8A421F"),
-    "PACKING":               dict(bg="#E7EDD9", fg="#4A5C25"),
-    "SEGURIDAD PATRIMONIAL": dict(bg="#E7E0F4", fg="#4A3175"),
-    "CHOFER BUS":            dict(bg="#D8EDEC", fg="#1C5E5C"),
-    "CAMPO":                 dict(bg="#F1EBD2", fg="#6B5A10"),
-    "NO DEFINIDO":           dict(bg="#EDECE6", fg="#6B716C"),
-}
-TIPO_ESTILO = {
-    "PROPIO":  dict(bg="#E1F0E5", fg="#1B6B36"),
-    "TERCERO": dict(bg="#FCEFD3", fg="#8A5A05"),
-    "NO DEFINIDO": dict(bg="#EDECE6", fg="#6B716C"),
-}
-GRAVEDAD_ESTILO = {
-    "GRAVE": dict(bg="rgba(192,51,46,.14)", fg="#A42B26"),
-    "MEDIO": dict(bg="rgba(232,163,23,.16)", fg="#8A5A05"),
-    "LEVE":  dict(bg="rgba(126,140,51,.16)", fg="#556019"),
-}
+VEREDICTO_ESTILO: dict = {}
+LABOR_ESTILO: dict = {}
+TIPO_ESTILO: dict = {}
+GRAVEDAD_ESTILO: dict = {}
+PRIZE_ESTILO: dict = {}
+
+
+def _hex_rgb(h: str):
+    h = h.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def tenue(color: str, alfa: float) -> str:
+    """Color de acento en versión traslúcida, para fondos de fila y píldoras."""
+    r, g, b = _hex_rgb(color)
+    return f"rgba({r},{g},{b},{min(alfa * ALFA, .95):.3f})"
+
+
+def _tono(color: str, factor: float) -> str:
+    """Aclara (factor>0) u oscurece (factor<0) un color para texto sobre fondo."""
+    r, g, b = _hex_rgb(color)
+    if factor >= 0:
+        r, g, b = (int(x + (255 - x) * factor) for x in (r, g, b))
+    else:
+        r, g, b = (int(x * (1 + factor)) for x in (r, g, b))
+    return f"#{r:02X}{g:02X}{b:02X}"
+
+
+def aplicar_tema(nombre: str = "claro") -> None:
+    """Fija la paleta de la interfaz. Llamar ANTES de css() y de pintar nada."""
+    global TEMA, PAPER, SURFACE, SURFACE2, INK, INK2, MUTED, RULE, RULE_SOFT
+    global SOMBRA, VELO, ALFA
+    global VEREDICTO_ESTILO, LABOR_ESTILO, TIPO_ESTILO, GRAVEDAD_ESTILO, PRIZE_ESTILO
+    TEMA = nombre if nombre in TEMAS else "claro"
+    t = TEMAS[TEMA]
+    PAPER, SURFACE, SURFACE2 = t["PAPER"], t["SURFACE"], t["SURFACE2"]
+    INK, INK2, MUTED = t["INK"], t["INK2"], t["MUTED"]
+    RULE, RULE_SOFT, SOMBRA, VELO = t["RULE"], t["RULE_SOFT"], t["SOMBRA"], t["VELO"]
+    ALFA = t["ALFA"]
+    oscuro = TEMA == "oscuro"
+    claro_txt = (lambda c: _tono(c, .35)) if oscuro else (lambda c: _tono(c, -.25))
+
+    def etiqueta(color, alfa=.16):
+        """Fondo traslúcido + texto legible, en ambos temas."""
+        return dict(bg=tenue(color, alfa), fg=claro_txt(color))
+
+    VEREDICTO_ESTILO = {
+        v: dict(fondo=tenue(C.COLOR[v], .13 if v != "APTO CON OBSERVACION" else .07),
+                riel=C.COLOR[v],
+                pill_bg=(C.COLOR[v] if v in ("NO APTO", "REVISION EN COMITE")
+                         else tenue(C.COLOR[v], .18)),
+                pill_fg=("#FFFFFF" if v == "NO APTO" else
+                         ("#221704" if v == "REVISION EN COMITE" else claro_txt(C.COLOR[v]))))
+        for v in C.VEREDICTOS}
+    LABOR_ESTILO = {k: etiqueta(v, .18) for k, v in C.COLOR_LABOR.items()}
+    TIPO_ESTILO = {"PROPIO": etiqueta(C.GOOD, .16),
+                   "TERCERO": etiqueta(C.WARN, .16),
+                   "NO DEFINIDO": etiqueta(C.IDLE, .14)}
+    GRAVEDAD_ESTILO = {"GRAVE": etiqueta(C.CRIT), "MEDIO": etiqueta(C.WARN),
+                       "LEVE": etiqueta(C.OLIVE)}
+    PRIZE_ESTILO = {"ACTIVO EN PLANILLA": etiqueta(C.GOOD),
+                    "CESADO": etiqueta(C.WARN),
+                    "SIN DATO DE VIGENCIA": etiqueta(C.IDLE, .14),
+                    "SIN MAESTRO CARGADO": etiqueta(C.IDLE, .14),
+                    M.SIN_MATCH: etiqueta(C.CRIT, .17)}
+
+
+aplicar_tema("claro")
 
 
 def tight(s: str) -> str:
@@ -70,8 +126,9 @@ def esc(x) -> str:
 
 
 def color_indice(v) -> str:
+    """Color del índice de riesgo, siguiendo la paleta del tema activo."""
     v = v or 0
-    return "#C0332E" if v >= 75 else "#E8A317" if v >= 50 else "#C07C11" if v >= 30 else "#1F7A3D"
+    return C.CRIT if v >= 75 else C.WARN if v >= 50 else C.AMBAR2 if v >= 30 else C.GOOD
 
 
 # ------------------------------------------------------------------ CSS
@@ -84,8 +141,9 @@ def css() -> str:
 :root{{
   --paper:{PAPER}; --surface:{SURFACE}; --surface-2:{SURFACE2}; --ink:{INK}; --ink-2:{INK2};
   --muted:{MUTED}; --rule:{RULE}; --rule-soft:{RULE_SOFT}; --brand:{C.BRAND};
-  --crit:{C.CRIT}; --warn:{C.WARN}; --good:{C.GOOD}; --olive:#7E8C33; --idle:{C.IDLE};
-  --shadow:0 1px 2px rgba(20,23,26,.05), 0 6px 20px -14px rgba(20,23,26,.22);
+  --crit:{C.CRIT}; --warn:{C.WARN}; --good:{C.GOOD}; --olive:{C.OLIVE}; --idle:{C.IDLE};
+  --velo:{VELO}; --shadow:{SOMBRA};
+  --brand-suave:{tenue(C.BRAND, .14)}; --crit-suave:{tenue(C.CRIT, .12)};
 }}
 .stApp, .stApp button, .stApp input, .stApp select, .stApp textarea, .stMarkdown {{
   font-family:"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -128,29 +186,52 @@ section[data-testid="stSidebar"] hr {{ margin:.9rem 0; border-color:var(--rule-s
 /* ---------------- navegación de secciones (radio con aspecto de pestañas) ---
    Se usa un radio con key en vez de st.tabs para que la sección abierta
    sobreviva a cada filtro; el CSS lo disfraza de pestañas.                  */
-.st-key-navseccion div[role="radiogroup"] {{ gap:2px; flex-wrap:wrap; padding:0;
-  align-items:flex-end; border-bottom:1px solid var(--rule); }}
+.st-key-navseccion div[role="radiogroup"] {{ gap:4px; flex-wrap:wrap; padding:0;
+  align-items:flex-end; border-bottom:2px solid var(--rule); }}
 .st-key-navseccion div[role="radiogroup"] > div {{ margin:0 !important; }}
 .st-key-navseccion [data-testid="stRadioOption"],
-.st-key-navseccion label[data-baseweb="radio"] {{ height:40px; padding:0 15px;
+.st-key-navseccion label[data-baseweb="radio"] {{ height:40px; padding:0 16px;
   display:flex; align-items:center; margin:0 !important; cursor:pointer;
-  background:transparent; border:1px solid transparent; border-bottom:0;
-  border-radius:8px 8px 0 0; position:relative; top:1px; }}
+  background:var(--surface-2); border:1px solid var(--rule); border-bottom:0;
+  border-radius:9px 9px 0 0; position:relative; top:2px;
+  transition:background .12s ease, color .12s ease; }}
 .st-key-navseccion [data-testid="stRadioOption"]:hover,
-.st-key-navseccion label[data-baseweb="radio"]:hover {{ background:var(--surface-2); }}
+.st-key-navseccion label[data-baseweb="radio"]:hover {{ background:var(--brand-suave); }}
 /* el círculo del radio: primer div dentro del contenido del label */
 .st-key-navseccion [data-testid="stRadioOption"] > div > div:first-child,
 .st-key-navseccion label[data-baseweb="radio"] > div:first-of-type {{ display:none !important; }}
 .st-key-navseccion [data-testid="stRadioOption"] p,
 .st-key-navseccion label[data-baseweb="radio"] p {{ font-size:13.5px !important;
-  font-weight:500 !important; margin:0 !important; letter-spacing:0 !important;
+  font-weight:600 !important; margin:0 !important; letter-spacing:0 !important;
   text-transform:none !important; color:var(--muted) !important; white-space:nowrap; }}
+/* PESTAÑA ACTIVA: fondo de marca, texto en blanco y acento arriba */
 .st-key-navseccion [data-testid="stRadioOption"][data-selected="true"],
 .st-key-navseccion div[role="radiogroup"] > div:has(input:checked) > label {{
-  background:var(--surface); border-color:var(--rule); }}
+  background:var(--brand) !important; border-color:var(--brand);
+  box-shadow:0 -3px 0 0 var(--brand) inset, 0 -2px 10px -6px var(--brand); }}
 .st-key-navseccion [data-testid="stRadioOption"][data-selected="true"] p,
 .st-key-navseccion div[role="radiogroup"] > div:has(input:checked) p {{
-  color:var(--brand) !important; font-weight:600 !important; }}
+  color:#FFFFFF !important; font-weight:700 !important; }}
+
+/* ---- controles segmentados (Sentido, Desagregar por, Cómo subir) ---- */
+[class*="st-key-seg"] div[role="radiogroup"] {{ gap:3px; flex-wrap:wrap; background:var(--surface-2);
+  border:1px solid var(--rule); border-radius:10px; padding:3px; }}
+[class*="st-key-seg"] div[role="radiogroup"] > div {{ margin:0 !important; }}
+[class*="st-key-seg"] [data-testid="stRadioOption"], [class*="st-key-seg"] label[data-baseweb="radio"] {{
+  display:flex; align-items:center; height:30px; padding:0 12px; margin:0 !important;
+  border-radius:7px; cursor:pointer; }}
+[class*="st-key-seg"] [data-testid="stRadioOption"] > div > div:first-child,
+[class*="st-key-seg"] label[data-baseweb="radio"] > div:first-of-type {{ display:none !important; }}
+[class*="st-key-seg"] [data-testid="stRadioOption"] p, [class*="st-key-seg"] label[data-baseweb="radio"] p {{
+  font-size:12px !important; font-weight:600 !important; margin:0 !important;
+  text-transform:none !important; letter-spacing:0 !important;
+  color:var(--muted) !important; white-space:nowrap; }}
+[class*="st-key-seg"] [data-testid="stRadioOption"]:hover {{ background:var(--brand-suave); }}
+[class*="st-key-seg"] [data-testid="stRadioOption"][data-selected="true"],
+[class*="st-key-seg"] div[role="radiogroup"] > div:has(input:checked) > label {{
+  background:var(--brand); box-shadow:var(--shadow); }}
+[class*="st-key-seg"] [data-testid="stRadioOption"][data-selected="true"] p,
+[class*="st-key-seg"] div[role="radiogroup"] > div:has(input:checked) p {{ color:#FFFFFF !important; }}
 
 /* ---------------- encabezado ---------------- */
 .hero {{ display:flex; align-items:flex-start; gap:16px; flex-wrap:wrap;
@@ -179,8 +260,19 @@ section[data-testid="stSidebar"] hr {{ margin:.9rem 0; border-color:var(--rule-s
 @media(max-width:900px){{ .herotot{{ width:100%; }} .tot{{ flex:1; }} }}
 .conf {{ margin-left:auto; align-self:center; display:inline-flex; align-items:center; gap:7px;
   font-size:10.5px; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
-  color:var(--crit); background:rgba(192,51,46,.09);
-  border:1px solid rgba(192,51,46,.35); padding:6px 12px; border-radius:999px; }}
+  color:var(--crit); background:var(--crit-suave);
+  border:1px solid {tenue(C.CRIT, .35)}; padding:6px 12px; border-radius:999px; }}
+
+/* ---------------- franja de planilla ---------------- */
+.pstrip {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px;
+  margin:2px 0 4px; }}
+.pchip {{ background:var(--surface); border:1px solid var(--rule); border-radius:11px;
+  padding:9px 13px; border-left:4px solid var(--c); box-shadow:var(--shadow); }}
+.pchip .v {{ font-family:Archivo; font-weight:700; font-size:24px; line-height:1.1;
+  letter-spacing:-.03em; color:var(--ink); font-variant-numeric:tabular-nums; }}
+.pchip .l {{ font-size:10.5px; font-weight:700; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--c); margin-top:2px; }}
+.pchip .s {{ font-size:11px; color:var(--muted); margin-top:2px; }}
 
 /* ---------------- tarjetas KPI ---------------- */
 .kpirow {{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin:4px 0 6px; }}
@@ -250,7 +342,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stVerticalBlock
 /* --------- señales agrupadas por base de cálculo --------- */
 .sgroup {{ border:1px solid var(--rule-soft); border-left:4px solid var(--c);
   border-radius:9px; padding:4px 11px 7px; margin-bottom:11px;
-  background:rgba(255,255,255,.55); }}
+  background:var(--velo); }}
 .sgroup .sghd {{ display:flex; align-items:center; gap:7px; flex-wrap:wrap;
   font-size:10.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
   color:var(--c); padding:7px 0 4px; }}
@@ -268,7 +360,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stVerticalBlock
 .agrid .acard {{ height:auto; }}
 .acount {{ display:inline-flex; align-items:center; gap:7px; font-size:11px; font-weight:700;
   letter-spacing:.07em; text-transform:uppercase; color:var(--crit);
-  background:rgba(192,51,46,.09); border:1px solid rgba(192,51,46,.30);
+  background:var(--crit-suave); border:1px solid {tenue(C.CRIT, .30)};
   padding:4px 11px; border-radius:999px; }}
 .acard {{ background:var(--surface); border:1px solid var(--rule); border-left:5px solid var(--c);
   border-radius:11px; padding:13px 15px; box-shadow:var(--shadow); height:100%; }}
@@ -300,7 +392,8 @@ div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stVerticalBlock
 .padron {{ border:1px solid var(--rule); border-radius:12px; overflow:hidden;
   background:var(--surface); box-shadow:var(--shadow); }}
 .pgrid {{ display:grid;
-  grid-template-columns: minmax(170px,2fr) 88px 102px 82px minmax(104px,1fr) 44px 74px 66px 116px 148px;
+  grid-template-columns: minmax(150px,1.9fr) 84px 96px 74px minmax(92px,1fr)
+                         minmax(96px,1fr) 42px 62px 58px 104px 132px;
   align-items:center; }}
 .phead {{ background:var(--surface-2); border-bottom:1px solid var(--rule);
   position:sticky; top:0; z-index:3; }}
@@ -323,10 +416,10 @@ details.prow .car {{ display:inline-block; width:0; height:0; flex:none;
 details.prow[open] .car {{ transform:rotate(90deg); }}
 details.prow .num {{ font-variant-numeric:tabular-nums; }}
 details.prow .ixwrap {{ display:flex; align-items:center; gap:7px; }}
-details.prow .ixtrack {{ flex:1; height:6px; background:rgba(20,23,26,.10); border-radius:4px;
+details.prow .ixtrack {{ flex:1; height:6px; background:{tenue(INK, .10)}; border-radius:4px;
   overflow:hidden; min-width:40px; }}
 details.prow .ixtrack i {{ display:block; height:100%; border-radius:4px; }}
-.pdet {{ padding:4px 14px 15px 14px; background:rgba(255,255,255,.55);
+.pdet {{ padding:4px 14px 15px 14px; background:var(--velo);
   border-top:1px dashed var(--rule); }}
 .dtab {{ width:100%; border-collapse:collapse; margin-top:8px; }}
 .dtab th {{ text-align:left; font-size:9.5px; font-weight:700; letter-spacing:.08em;
@@ -337,6 +430,13 @@ details.prow .ixtrack i {{ display:block; height:100%; border-radius:4px; }}
 .dtab td.d {{ color:var(--ink); font-weight:500; max-width:330px; white-space:normal; }}
 .idxline {{ margin-top:9px; font-size:11px; color:var(--muted);
   font-family:"IBM Plex Mono", monospace; }}
+.plin {{ margin-top:9px; font-size:11.5px; color:var(--ink-2); line-height:1.5;
+  border-left:3px solid var(--c); padding:4px 0 4px 9px; }}
+.plin b {{ color:var(--c); font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; }}
+.plin .pdat {{ display:flex; gap:8px 16px; flex-wrap:wrap; margin-top:3px; }}
+.plin .pdat span {{ white-space:nowrap; }}
+.plin .pdat i {{ font-style:normal; color:var(--muted); margin-right:5px; font-size:10.5px;
+  text-transform:uppercase; letter-spacing:.05em; }}
 .vacio {{ padding:30px; text-align:center; color:var(--muted); font-size:13px; }}
 
 /* ---------------- métricas nativas ---------------- */
@@ -354,11 +454,60 @@ hr {{ border-color:var(--rule-soft); }}
   margin-top:9px; align-items:center; }}
 .leyenda span {{ display:inline-flex; align-items:center; gap:6px; }}
 .sw {{ width:11px; height:11px; border-radius:3px; flex:none; }}
-.nota {{ background:rgba(23,86,74,.07); border:1px solid rgba(23,86,74,.22);
+.nota {{ background:{tenue(C.BRAND, .07)}; border:1px solid {tenue(C.BRAND, .22)};
   border-radius:10px; padding:13px 15px; font-size:12.5px; color:var(--ink-2); line-height:1.55; }}
 .nota b {{ color:var(--ink); }}
 .nota ul {{ margin:8px 0 0; padding-left:18px; }}
 .nota li {{ margin-bottom:5px; }}
+
+/* ---------------- cromo de Streamlit ---------------- */
+.stApp, .stApp p, .stApp li, .stApp span, .stApp label, [data-testid="stMarkdownContainer"] {{
+  color:var(--ink); }}
+header[data-testid="stHeader"] {{ background:transparent; }}
+[data-testid="stToolbar"] {{ color:var(--muted); }}
+.stButton button, .stDownloadButton button, [data-testid^="stBaseButton"] {{
+  border-radius:9px !important; font-weight:600 !important;
+  border:1px solid var(--rule) !important; background:var(--surface-2) !important;
+  color:var(--ink) !important; transition:background .12s ease, border-color .12s ease; }}
+.stButton button p, .stDownloadButton button p, [data-testid^="stBaseButton"] p,
+.stButton button div, .stDownloadButton button div {{ color:inherit !important; }}
+.stButton button:hover, .stDownloadButton button:hover,
+[data-testid^="stBaseButton"]:hover {{
+  border-color:var(--brand) !important; background:var(--brand-suave) !important; }}
+.stButton button[kind="primary"], .stDownloadButton button[kind="primary"],
+[data-testid="stBaseButton-primary"], [data-testid="stBaseButton-primaryFormSubmit"] {{
+  background:var(--brand) !important; border-color:var(--brand) !important;
+  color:#FFFFFF !important; }}
+.stButton button[kind="primary"] p, .stDownloadButton button[kind="primary"] p,
+[data-testid="stBaseButton-primary"] p {{ color:#FFFFFF !important; }}
+.stButton button[kind="primary"]:hover, .stDownloadButton button[kind="primary"]:hover,
+[data-testid="stBaseButton-primary"]:hover {{ filter:brightness(1.1); }}
+.stButton button:disabled, [data-testid^="stBaseButton"]:disabled {{ opacity:.45; }}
+[data-baseweb="input"], [data-baseweb="select"] > div, [data-baseweb="base-input"],
+.stTextInput input, .stNumberInput input, [data-testid="stTextInputRootElement"] {{
+  background:var(--surface) !important; color:var(--ink) !important;
+  border-color:var(--rule) !important; }}
+[data-baseweb="tag"] {{ background:var(--brand) !important; color:#FFFFFF !important; }}
+[data-baseweb="popover"] li, [data-baseweb="menu"] {{ background:var(--surface) !important;
+  color:var(--ink) !important; }}
+[data-testid="stExpander"] {{ border:1px solid var(--rule); border-radius:11px;
+  background:var(--surface); box-shadow:var(--shadow); overflow:hidden; }}
+[data-testid="stExpander"] summary {{ color:var(--ink); font-weight:600; }}
+[data-testid="stFileUploaderDropzone"], [data-testid="stFileUploader"] section {{
+  background:var(--surface-2) !important; border:1.5px dashed var(--rule) !important;
+  border-radius:11px; color:var(--ink) !important; }}
+[data-testid="stFileUploaderDropzone"]:hover {{ border-color:var(--brand) !important; }}
+[data-testid="stNotification"], .stAlert {{ background:var(--surface) !important;
+  color:var(--ink) !important; border:1px solid var(--rule); border-radius:11px; }}
+[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p {{
+  color:var(--muted) !important; }}
+code, .stCode, pre {{ background:var(--surface-2) !important; color:var(--ink) !important;
+  border-radius:8px; }}
+[data-testid="stSlider"] [data-baseweb="slider"] div[role="slider"] {{ background:var(--brand); }}
+[data-testid="stCheckbox"] svg, [data-testid="stToggle"] svg {{ color:var(--brand); }}
+/* las tablas nativas se dibujan en canvas: se enmarcan como tarjeta propia */
+[data-testid="stDataFrame"], [data-testid="stDataFrameResizable"] {{
+  border-radius:10px; border:1px solid var(--rule); overflow:hidden; }}
 </style>
 """)
 
@@ -422,6 +571,15 @@ def kpi_row(items) -> str:
   <div class="sub">{p}% del grupo · {esc(sub)}</div>
   <div class="bar"><i style="width:{p}%"></i></div></div>""")
     return '<div class="kpirow">' + "".join(out) + '</div>'
+
+
+def tira_planilla(items) -> str:
+    """Franja compacta de datos de planilla: [(etiqueta, valor, sub, color), ...]"""
+    piezas = "".join(f"""<div class="pchip" style="--c:{col}">
+  <div class="v">{num(val)}</div>
+  <div class="l">{esc(lab)}</div>
+  <div class="s">{esc(sub)}</div></div>""" for lab, val, sub, col in items)
+    return f'<div class="pstrip">{piezas}</div>'
 
 
 def pill(veredicto: str) -> str:
@@ -535,8 +693,53 @@ def leyenda_veredictos() -> str:
 
 
 # ------------------------------------------------------------ el padrón
-CAB = ["Colaborador", "DNI", "Labor", "Personal", "Cuadrilla", "Nv", "Delitos",
-       "Último", "Índice", "Veredicto"]
+CAB = ["Colaborador", "DNI", "Labor", "Personal", "Cuadrilla", "Planilla Prize", "Nv",
+       "Delitos", "Último", "Índice", "Veredicto"]
+
+
+def chip_prize(r) -> str:
+    """Insignia compacta con la situación de la persona dentro de Prize."""
+    estado = str(r.get('ESTADO_PRIZE') or '')
+    if not estado or estado == 'SIN MAESTRO CARGADO':
+        return '<span style="color:#9AA09B;font-size:11px">—</span>'
+    corto = {'ACTIVO EN PLANILLA': 'ACTIVO', 'CESADO': 'CESADO',
+             M.SIN_MATCH: 'NO PRIZE', 'SIN DATO DE VIGENCIA': 'SIN DATO'}.get(estado, estado)
+    e = PRIZE_ESTILO.get(estado, dict(bg="#EDECE6", fg="#6B716C"))
+    area = str(r.get('AREA') or '')
+    titulo = esc(f"{estado} · {area}" if area and area != M.SIN_MATCH else estado)
+    return (f'<span class="tag" style="background:{e["bg"]};color:{e["fg"]}" '
+            f'title="{titulo}">{esc(corto)}</span>')
+
+
+def linea_planilla(r) -> str:
+    """Los datos de planilla de una persona, dentro de su ficha del padrón."""
+    estado = str(r.get('ESTADO_PRIZE') or '')
+    if not estado or estado == 'SIN MAESTRO CARGADO':
+        return ""
+    if estado == M.SIN_MATCH:
+        return (f'<div class="plin" style="--c:{C.CRIT}"><b>{esc(M.SIN_MATCH)}</b> — '
+                'este DNI no figura en el maestro de funcionarios: probablemente es '
+                'personal de contrata o el DNI está mal escrito en el Excel.</div>')
+    campos = [("Empresa", r.get('EMPRESA')), ("Código", r.get('COD_FUNCIONARIO')),
+              ("Área", r.get('AREA')), ("Cargo", r.get('CARGO')),
+              ("Centro de costo", r.get('CENTRO_COSTO')), ("Régimen", r.get('REGIMEN')),
+              ("Planilla", r.get('PLANILLA')), ("Ingreso", r.get('FECHA_INGRESO')),
+              ("Cese", r.get('FECHA_CESE'))]
+    try:
+        ant = float(r.get('ANTIGUEDAD_ANIOS'))
+        campos.append(("Antigüedad", f"{ant:.1f} años"))
+    except (TypeError, ValueError):
+        pass
+    try:
+        if float(r.get('N_CONTRATOS')) > 1:
+            campos.append(("Contratos", int(float(r.get('N_CONTRATOS')))))
+    except (TypeError, ValueError):
+        pass
+    piezas = "".join(f"<span><i>{esc(k)}</i>{esc(v)}</span>"
+                     for k, v in campos if str(v or "").strip())
+    color = C.GOOD if estado == 'ACTIVO EN PLANILLA' else C.WARN
+    return (f'<div class="plin" style="--c:{color}"><b>{esc(estado)}</b>'
+            f'<span class="pdat">{piezas}</span></div>')
 
 
 def padron(df_p: pd.DataFrame, df_d: pd.DataFrame, limite: int = 400) -> str:
@@ -560,6 +763,7 @@ def padron(df_p: pd.DataFrame, df_d: pd.DataFrame, limite: int = 400) -> str:
   <div>{tag(r['LABOR'], LABOR_ESTILO)}</div>
   <div>{tag(r['TIPO_PERSONAL'], TIPO_ESTILO)}</div>
   <div style="color:{MUTED};font-size:11.5px">{esc(r['CARPETAS'])}</div>
+  <div>{chip_prize(r)}</div>
   <div>{nchip(r['NIVEL_NUM'])}</div>
   <div class="num">{ndel}</div>
   <div class="num" style="color:{anio_col};font-weight:600">{anio}</div>
@@ -576,7 +780,7 @@ def padron(df_p: pd.DataFrame, df_d: pd.DataFrame, limite: int = 400) -> str:
   <td>{esc(d['CATEGORIA'])}</td>
   <td>{tag(d['GRAVEDAD'], GRAVEDAD_ESTILO)}</td>
   <td class="mono">{'—' if pd.isna(d['ANIO']) else int(d['ANIO'])}</td>
-  <td>{'<span class="tag" style="background:rgba(192,51,46,.13);color:#A42B26">' + esc(d['ESTADO']) + '</span>' if d['ACTIVO'] else '<span style="color:' + MUTED + '">' + esc(d['ESTADO']) + '</span>'}</td>
+  <td>{tag(d['ESTADO'], {d['ESTADO']: GRAVEDAD_ESTILO['GRAVE']}) if d['ACTIVO'] else '<span style="color:' + MUTED + '">' + esc(d['ESTADO']) + '</span>'}</td>
   <td>{esc(d['JURISDICCION']) or '—'}</td>
   <td>{esc(d['PARTE']) or '—'}</td>
   <td style="color:{MUTED}">{esc(d['FUENTE'])}</td>
@@ -585,6 +789,7 @@ def padron(df_p: pd.DataFrame, df_d: pd.DataFrame, limite: int = 400) -> str:
   <thead><tr><th>Nv</th><th>Delito</th><th>Categoría</th><th>Gravedad</th><th>Año</th>
   <th>Estado</th><th>Jurisdicción</th><th>Parte</th><th>Fuente</th><th>Caso</th></tr></thead>
   <tbody>{cuerpo}</tbody></table>
+  {linea_planilla(r)}
   <div class="idxline">Índice {ix} = gravedad {int(r['IDX_GRAVEDAD'])} + vigencia {int(r['IDX_VIGENCIA'])}
   + reincidencia {int(r['IDX_REINCIDENCIA'])} + caso activo {int(r['IDX_CASO_ACTIVO'])}
   + dispersión {int(r['IDX_DISPERSION'])}

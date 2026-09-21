@@ -33,19 +33,25 @@ La detección se puede forzar con la variable de entorno `FILTRO_MODO=local` o
 
 ### Subir la carpeta en la versión web
 
-1. Ubica la carpeta que **contiene las cuadrillas**.
-2. Clic derecho -> **Enviar a** -> **Carpeta comprimida (en zip)**.
-3. Arrastra el `.zip` a la barra lateral.
+Tres formas, en la barra lateral:
+
+| Modo | Qué hace |
+|---|---|
+| **📁 Carpeta** | Abre el selector de **carpetas** del navegador: eliges tu carpeta y se manda su contenido. Sin comprimir nada |
+| **🗜️ .zip** | Subes la carpeta comprimida; conserva la estructura tal cual |
+| **📄 Archivos** | Seleccionas los archivos a mano (Excel, PDF y el maestro) |
+
+El modo *Carpeta* añade el atributo `webkitdirectory` al cargador de Streamlit desde el
+propio navegador (`selector_de_carpeta_js()` en `app.py`). El navegador no manda las
+subcarpetas, así que la cuadrilla se deduce del nombre de cada Excel y los PDF van a una
+carpeta `Adjuntos` común: el cruce PDF → persona es por DNI, de modo que el resultado es
+idéntico. Si el navegador no soportara el selector de carpetas, quedan el `.zip` y los
+archivos sueltos.
 
 Si el `.zip` envuelve todo en una carpeta (`FILTER/ESTIBAS01/...`), la app baja sola
 hasta el nivel correcto. Solo se extraen `.xlsx` y `.pdf`; cualquier otra cosa se
 descarta, y las rutas que apunten fuera de la carpeta de destino (*zip slip*) se
 rechazan.
-
-Alternativa sin comprimir: **Archivos sueltos**. Se seleccionan los
-`Resumen_NEW_VIP_*.xlsx` y todos los PDF; la cuadrilla se deduce del nombre de cada
-Excel y los PDF van a una carpeta `Adjuntos` comun (el cruce PDF -> persona es por DNI,
-así que el resultado es idéntico).
 
 **Privacidad.** Cada sesión trabaja en su propia carpeta temporal y no ve la de nadie
 más; el botón *Borrar mis datos del servidor* la elimina en el acto y, si no, se limpia
@@ -53,6 +59,60 @@ sola a las 6 horas. Aun así, una app pública en Streamlit Cloud la puede abrir
 con el enlace: para datos reales conviene un repositorio privado y restringir los correos
 en **Settings -> Sharing** de Streamlit Cloud. El límite de subida es `MAX_SUBIDA_MB` en
 `filtro/config.py` y `maxUploadSize` en `.streamlit/config.toml` (deben coincidir).
+
+---
+
+## Planilla Prize: quién es cada DNI
+
+El tablero cruza el padrón contra el **maestro de funcionarios** (el export de qbiz, que
+trae todos los campos dentro de una columna `payload` en JSON). El cruce es por DNI,
+comparando solo dígitos y sin ceros a la izquierda.
+
+- Un DNI con varios contratos deja **una sola fila**: la vigente y, entre ellas, la de
+  modificación más reciente. `N_CONTRATOS` dice cuántas había.
+- Un DNI que no está en el maestro se marca **`NO PERTENECE A PRIZE`** — normalmente es
+  personal de contrata, o un DNI mal escrito en el Excel de la cuadrilla.
+- Campos que se añaden: empresa, código de funcionario, área, cargo, centro de costo,
+  régimen, tipo de trabajador, planilla, fechas de ingreso y cese, antigüedad y situación
+  (`ACTIVO EN PLANILLA` / `CESADO`).
+- Si el Excel de la cuadrilla ya traía una columna con el mismo nombre (CARGO, ÁREA…),
+  la original se conserva renombrada a `<COLUMNA>_ORIGEN`. Nunca se pisa un dato de
+  origen sin dejar rastro.
+
+**De dónde sale el archivo:** se deja en la carpeta de trabajo (vale cualquier nombre con
+`funcionario`, `qbiz`, `maestro` o `planilla`) y el tablero lo detecta solo; o se sube
+desde la barra lateral, en *Maestro de planilla*. En la versión web basta con que venga
+dentro de la carpeta o del `.zip`.
+
+Alimenta la sección **Planilla Prize**, la franja de totales de la cabecera, la columna
+*Planilla Prize* del padrón, los filtros por área / empresa / situación y la sección 8
+del Excel.
+
+---
+
+## Tema claro y oscuro
+
+Botón ☀️/🌙 arriba en la barra lateral. Cambia la paleta completa: interfaz, tarjetas,
+tablas y **también los gráficos** (ejes, rejilla y colores se recalculan). Los acentos no
+son los mismos en los dos temas: sobre fondo oscuro suben en luminosidad para mantener
+contraste. Vive en `config.TEMAS`, `ui.TEMAS` y `charts.TEMAS`, cada uno con su
+`aplicar_tema()`.
+
+---
+
+## El Excel: cuatro hojas, sin repetir nada
+
+| Hoja | Qué trae |
+|---|---|
+| `Padron` | Una fila por persona, con todo: filtro, matriz, índice y los campos de planilla |
+| `Delitos` | Una fila por registro en rojo |
+| `Resumen` | Los conteos: cobertura, decisión, riesgo, categorías, señales, cortes por labor, matriz de criticidad y cruce con planilla |
+| `Criterio_y_Metodo` | Las reglas N1-N6 en orden y la trazabilidad del proceso |
+
+Antes eran siete y tres pares repetían los mismos datos: `Hoja1` y `Resumen_Persona`
+tenían el mismo padrón; `Matriz_Criticidad` repetía conteos que ya estaban en
+`Estadisticas`; y `Fuentes_y_Metodo` continuaba lo de `Criterio_N1_N6`. Ahora cada dato
+vive en un solo sitio.
 
 ---
 
@@ -138,6 +198,7 @@ datos sin devolverte a *Resumen*.
 
 | Pestaña | Qué muestra |
 |---|---|
+| Planilla Prize | Cruce por DNI con el maestro: veredicto por área, cargos, situación en la empresa y quiénes no pertenecen a Prize |
 | Resumen | KPI de decisión, personas por nivel (N1-N6 + **sin observaciones** + **sin verificar**), señales de alerta separadas por base (delitos / personas) y **todas** las tarjetas de acción inmediata |
 | Propio vs tercero | Tasa de retiro, cobertura e índice medio por labor; composición por labor / tipo / cuadrilla |
 | Matriz y categorías | Matriz de criticidad N1-N6 + **sin observaciones** + **sin verificar** + fila de total, delitos por categoría y la tabla completa de delitos en rojo |
@@ -199,7 +260,8 @@ requirements.txt
 run_windows.bat
 .streamlit/config.toml  tema
 filtro/
-  config.py             TODOS los criterios — es el archivo que se edita
+  config.py             TODOS los criterios y los dos temas — es el archivo que se edita
+  maestro.py            maestro de funcionarios: JSON -> columnas, dedup y cruce por DNI
   carpetas.py           elección de carpeta: explorador nativo, historial, diagnóstico
                         y, en la web, subida de .zip / archivos sueltos
   pdf_reader.py         detección del rojo y lectura de los reportes

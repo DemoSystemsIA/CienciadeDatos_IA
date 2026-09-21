@@ -26,6 +26,7 @@ import time
 import zipfile
 
 from . import config as C
+from . import maestro as M
 
 # ------------------------------------------------------- historial en disco
 DIR_ESTADO = os.path.join(os.path.expanduser("~"), ".filtro_antecedentes")
@@ -343,7 +344,16 @@ def _destino_seguro(base: str, nombre: str) -> str | None:
     return ruta
 
 
-EXT_PERMITIDAS = (".xlsx", ".xlsm", ".pdf")
+EXT_PERMITIDAS = (".xlsx", ".xlsm", ".pdf", ".csv")
+
+
+def _guardar_maestro(datos: bytes, destino: str, nombre: str) -> None:
+    """Deja el export de funcionarios donde el tablero lo busca siempre."""
+    ext = os.path.splitext(nombre)[1].lower() or ".csv"
+    carpeta = os.path.join(destino, ".cache_filtro")
+    os.makedirs(carpeta, exist_ok=True)
+    with open(os.path.join(carpeta, f"maestro_prize{ext}"), "wb") as f:
+        f.write(datos)
 
 
 def extraer_zip(archivo, destino: str) -> dict:
@@ -353,7 +363,7 @@ def extraer_zip(archivo, destino: str) -> dict:
     """
     shutil.rmtree(destino, ignore_errors=True)
     os.makedirs(destino, exist_ok=True)
-    n_ex = n_pdf = n_ign = 0
+    n_ex = n_pdf = n_ign = n_mae = 0
     try:
         with zipfile.ZipFile(archivo) as z:
             for info in z.infolist():
@@ -366,6 +376,11 @@ def extraer_zip(archivo, destino: str) -> dict:
                 if ext not in EXT_PERMITIDAS:
                     n_ign += 1
                     continue
+                if M.parece_maestro(base):          # export de funcionarios
+                    with z.open(info) as origen:
+                        _guardar_maestro(origen.read(), destino, base)
+                    n_mae += 1
+                    continue
                 ruta = _destino_seguro(destino, info.filename)
                 if not ruta:
                     n_ign += 1
@@ -377,12 +392,23 @@ def extraer_zip(archivo, destino: str) -> dict:
                 n_pdf += ext == ".pdf"
     except zipfile.BadZipFile:
         return dict(ok=False, motivo="El archivo no es un .zip válido.",
-                    excels=0, pdfs=0, ignorados=0, raiz=destino)
+                    excels=0, pdfs=0, ignorados=0, maestros=0, raiz=destino)
     if not n_ex:
-        return dict(ok=False, excels=0, pdfs=n_pdf, ignorados=n_ign, raiz=destino,
-                    motivo=f"El .zip no trae ningún «{C.PATRON_EXCEL}».")
-    return dict(ok=True, excels=n_ex, pdfs=n_pdf, ignorados=n_ign,
-                raiz=_raiz_dentro(destino), motivo="")
+        return dict(ok=False, excels=0, pdfs=n_pdf, ignorados=n_ign, maestros=n_mae,
+                    raiz=destino, motivo=f"El .zip no trae ningún «{C.PATRON_EXCEL}».")
+    raiz = _raiz_dentro(destino)
+    if n_mae and raiz != destino:      # el maestro va donde esté la raíz real
+        _mover_maestro(destino, raiz)
+    return dict(ok=True, excels=n_ex, pdfs=n_pdf, ignorados=n_ign, maestros=n_mae,
+                raiz=raiz, motivo="")
+
+
+def _mover_maestro(origen: str, destino: str) -> None:
+    for nombre in M.GUARDADOS:
+        a = os.path.join(origen, ".cache_filtro", nombre)
+        if os.path.isfile(a):
+            os.makedirs(os.path.join(destino, ".cache_filtro"), exist_ok=True)
+            shutil.move(a, os.path.join(destino, ".cache_filtro", nombre))
 
 
 def _raiz_dentro(base: str) -> str:
@@ -421,12 +447,15 @@ def guardar_sueltos(archivos, destino: str) -> dict:
     os.makedirs(destino, exist_ok=True)
     comun = os.path.join(destino, C.SUBCARPETA_PDF)
     os.makedirs(comun, exist_ok=True)
-    n_ex = n_pdf = n_ign = 0
+    n_ex = n_pdf = n_ign = n_mae = 0
     for f in archivos or []:
         base = os.path.basename(getattr(f, "name", "") or "")
         ext = os.path.splitext(base)[1].lower()
         datos = f.getbuffer() if hasattr(f, "getbuffer") else f.read()
-        if ext == ".pdf":
+        if M.parece_maestro(base):              # export de funcionarios
+            _guardar_maestro(bytes(datos), destino, base)
+            n_mae += 1
+        elif ext == ".pdf":
             with open(os.path.join(comun, base), "wb") as s:
                 s.write(datos)
             n_pdf += 1
@@ -444,9 +473,11 @@ def guardar_sueltos(archivos, destino: str) -> dict:
         else:
             n_ign += 1
     if not n_ex:
-        return dict(ok=False, excels=0, pdfs=n_pdf, ignorados=n_ign, raiz=destino,
+        return dict(ok=False, excels=0, pdfs=n_pdf, ignorados=n_ign, maestros=n_mae,
+                    raiz=destino,
                     motivo=f"Falta el «{C.PATRON_EXCEL}»: sin él no hay padrón que leer.")
-    return dict(ok=True, excels=n_ex, pdfs=n_pdf, ignorados=n_ign, raiz=destino, motivo="")
+    return dict(ok=True, excels=n_ex, pdfs=n_pdf, ignorados=n_ign, maestros=n_mae,
+                raiz=destino, motivo="")
 
 
 def etiqueta(ruta: str, ancho: int = 46) -> str:
