@@ -28,6 +28,8 @@ import zipfile
 from . import config as C
 from . import maestro as M
 
+VERSION = "3.2"   # debe coincidir con filtro/config.py
+
 # ------------------------------------------------------- historial en disco
 DIR_ESTADO = os.path.join(os.path.expanduser("~"), ".filtro_antecedentes")
 ARCHIVO_RECIENTES = os.path.join(DIR_ESTADO, "carpetas_recientes.json")

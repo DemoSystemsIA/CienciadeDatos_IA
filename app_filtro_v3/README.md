@@ -116,9 +116,45 @@ vive en un solo sitio.
 
 ---
 
+## Publicar en Streamlit Cloud
+
+La app se despliega desde un repositorio de GitHub, así que **todo el código tiene que
+estar en el repositorio**, no solo `app.py`. Publicar `app.py` nuevo con los módulos de
+`filtro/` viejos es el error más fácil de cometer y antes reventaba con un
+`AttributeError` incomprensible.
+
+Desde la versión 3.2 cada módulo declara su `VERSION` y `app.py` las compara al arrancar:
+si algo quedó desfasado, la app dice **qué archivo** hay que actualizar en vez de fallar.
+
+En Windows:
+
+```
+publicar_en_repo.bat "C:\ruta\al\repo\cienciadedatos_ia\app_filtro_v3"
+```
+
+Copia los `.py`, `requirements.txt`, `.streamlit/config.toml` y el README; borra las
+cachés del destino y comprueba que no falte ninguno de los archivos de `filtro/`. Después:
+
+```
+git rm -r --cached --ignore-unmatch "app_filtro_v3/filtro/__pycache__"
+git add -A
+git commit -m "..."
+git push
+```
+
+> **`__pycache__` versionado.** Si los `.pyc` llegaron alguna vez al repositorio, Python
+> puede acabar importando código viejo. El `.gitignore` ya los excluye, pero lo que se
+> subió antes sigue ahí hasta que se quita con `git rm -r --cached`.
+
+Los datos (carpetas de cuadrillas, PDF, el maestro de funcionarios) **no van al
+repositorio**: en la web se suben desde el navegador en cada sesión.
+
+---
+
 ## Instalación (Windows)
 
-Doble clic en **`run_windows.bat`**. La primera vez crea el entorno virtual e instala
+Doble clic en **`run_windows.bat
+publicar_en_repo.bat    copia el codigo al repositorio de Git, sin cachés ni datos`**. La primera vez crea el entorno virtual e instala
 las dependencias; después solo levanta el tablero. Necesita Python 3.9 o superior
 ([python.org](https://www.python.org/downloads/) — marca *Add Python to PATH* al instalar).
 

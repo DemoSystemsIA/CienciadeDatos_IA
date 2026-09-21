@@ -14,11 +14,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-from filtro import config as C
-from filtro import carpetas, charts, maestro, ui
-from filtro.loader import construir, escanear, firma as huella
-from filtro.excel_export import construir_excel
-from filtro.validate import validar
+VERSION = "3.2"
 
 
 # Streamlit renombró use_container_width -> width en 1.49; soportamos ambos.
@@ -33,6 +29,49 @@ ANCHO = {'width': 'stretch'} if _ver(st.__version__) >= (1, 49) else {'use_conta
 
 st.set_page_config(page_title="Filtro de Antecedentes · Prize", page_icon="🛡️",
                    layout="wide", initial_sidebar_state="expanded")
+
+
+# ------------------------------------------------- despliegue consistente
+# Los módulos se importan DESPUÉS de set_page_config y dentro de un try: si el
+# despliegue quedó a medias (app.py nuevo con filtro/ viejo, o al revés), se
+# explica qué archivo falta en vez de reventar con un AttributeError opaco.
+def _aviso_despliegue(detalle: str, faltan=()):
+    st.error(f"**Despliegue incompleto.** `app.py` es la versión {VERSION}, pero los "
+             "módulos de `filtro/` no están al día.")
+    if faltan:
+        st.markdown("\n".join(f"- `{n}` → versión **{v}**" for n, v in faltan))
+    st.code(detalle, language=None)
+    st.info("Copia la carpeta **completa** al repositorio — los archivos de `filtro/` "
+            "también, no solo `app.py` — y vuelve a desplegar. En Windows puedes usar "
+            "`publicar_en_repo.bat`. Si el repositorio tiene `filtro/__pycache__` "
+            "versionado, quítalo: `git rm -r --cached filtro/__pycache__`.", icon="🛠️")
+    st.stop()
+
+
+try:
+    from filtro import config as C
+    from filtro import carpetas, charts, maestro, ui
+    from filtro import excel_export, loader
+    from filtro.loader import construir, escanear, firma as huella
+    from filtro.excel_export import construir_excel
+    from filtro.validate import validar
+except Exception as _e:                      # módulo ausente o desfasado
+    _aviso_despliegue(f"{type(_e).__name__}: {_e}")
+# Si se publica app.py sin publicar también los módulos de filtro/ (o al revés),
+# el fallo aparece como un AttributeError incomprensible en mitad del arranque.
+# Aquí se detecta antes y se dice EXACTAMENTE qué archivo quedó viejo.
+def _desfasados() -> list[tuple[str, str]]:
+    modulos = [("filtro/config.py", C), ("filtro/ui.py", ui), ("filtro/charts.py", charts),
+               ("filtro/maestro.py", maestro), ("filtro/carpetas.py", carpetas),
+               ("filtro/loader.py", loader), ("filtro/excel_export.py", excel_export)]
+    return [(nombre, getattr(mod, "VERSION", "anterior a 3.2"))
+            for nombre, mod in modulos if getattr(mod, "VERSION", None) != VERSION]
+
+
+_viejos = _desfasados()
+if _viejos:
+    _aviso_despliegue("Versiones distintas entre app.py y filtro/.", _viejos)
+
 
 # ------------------------------------------------------------------ tema
 # Claro / oscuro con un botón. La paleta vive en config, ui y charts: se les
@@ -443,7 +482,7 @@ with st.sidebar:
             st.error("El archivo está abierto en Excel. Ciérralo y reintenta.")
         except OSError as e:
             st.error(f"No se pudo escribir: {e}")
-    st.caption(f"Huella `{sig[:10]}` · {dt.datetime.now():%d/%m/%Y %H:%M}")
+    st.caption(f"v{VERSION} · huella `{sig[:10]}` · {dt.datetime.now():%d/%m/%Y %H:%M}")
 
 
 # ---------------------------------------------------------------- filtros
@@ -749,8 +788,9 @@ elif seccion == "Propio vs tercero":
         ch = charts.composicion(P, campo)
     with st.container(border=True):
         if ch is not None:
-            st.altair_chart(ch, **ANCHO)
-        H(ui.leyenda_veredictos())
+            st.altair_chart(ch, **ANCHO)   # el gráfico ya trae su propia leyenda
+        else:
+            st.info("Sin datos para componer esta vista.")
 
     st.write("")
     H('<div class="sectitle"><h2>Tabla cruzada</h2><p>Personas por labor y veredicto.</p></div>')
@@ -758,13 +798,12 @@ elif seccion == "Propio vs tercero":
         cruce = (pd.crosstab(P['LABOR'], P['VEREDICTO'])
                  .reindex(columns=C.VEREDICTOS, fill_value=0))
         cruce['TOTAL'] = cruce.sum(axis=1)
-        sty = (cruce.style
-               .set_properties(**{'font-weight': '600'})
-               .background_gradient(cmap='Reds', subset=['NO APTO'], vmin=0)
-               .background_gradient(cmap='Oranges', subset=['REVISION EN COMITE',
-                                                            'APTO CON OBSERVACION'], vmin=0)
-               .background_gradient(cmap='Greens', subset=['APTO'], vmin=0)
-               .background_gradient(cmap='Greys', subset=['PENDIENTE DE REPORTE'], vmin=0))
+        sty = cruce.style.set_properties(**{'font-weight': '600'})
+        for _col in C.VEREDICTOS:
+            if _col in cruce.columns:
+                sty = sty.apply(ui.degradado, color=C.COLOR[_col], subset=[_col])
+        if 'TOTAL' in cruce.columns:
+            sty = sty.apply(ui.degradado, color=C.BRAND, subset=['TOTAL'])
         st.dataframe(sty, **ANCHO)
 
 # ===================================================== MATRIZ Y CATEGORÍAS
@@ -836,9 +875,8 @@ elif seccion == "Matriz y categorías":
              'FUENTE', 'CASO', 'REGLA']]
 
         def tinte(row):
-            col = {'GRAVE': 'rgba(192,51,46,.13)', 'MEDIO': 'rgba(232,163,23,.13)',
-                   'LEVE': 'rgba(126,140,51,.11)'}.get(row['GRAVEDAD'], '')
-            return [f'background-color:{col}'] * len(row)
+            color = C.COLOR_GRAVEDAD.get(row['GRAVEDAD'])
+            return [ui.fila_tenida(color) if color else ''] * len(row)
 
         st.dataframe(vis.style.apply(tinte, axis=1), hide_index=True, **ANCHO, height=430)
         st.download_button("⬇️  Descargar estos delitos (CSV)",
@@ -974,9 +1012,7 @@ elif seccion == "Criterio N1-N6":
 
     def tinte_regla(row):
         n = int(row['Nivel'][1])
-        col = {1: 'rgba(192,51,46,.14)', 2: 'rgba(192,51,46,.14)', 3: 'rgba(192,51,46,.14)',
-               4: 'rgba(232,163,23,.16)', 5: 'rgba(126,140,51,.13)', 6: 'rgba(126,140,51,.13)'}[n]
-        return [f'background-color:{col}'] * len(row)
+        return [ui.fila_tenida(C.COLOR_NIVEL[n], .15)] * len(row)
 
     st.dataframe(reglas.style.apply(tinte_regla, axis=1), hide_index=True, **ANCHO, height=430)
 

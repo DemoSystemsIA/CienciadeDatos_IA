@@ -12,6 +12,8 @@ import pandas as pd
 
 from . import config as C
 
+VERSION = "3.2"   # debe coincidir con filtro/config.py
+
 FONT = '"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif'
 FONT_NUM = '"IBM Plex Mono", ui-monospace, monospace'
 

@@ -3,3 +3,9 @@ pandas>=2.0
 altair>=5.0
 openpyxl>=3.1
 pdfplumber>=0.11
+# pandas.Styler (las tablas teñidas) necesita jinja2. Llega de rebote con
+# altair/streamlit, pero se declara para no depender de eso.
+jinja2>=3.1
+# OJO: NO se necesita matplotlib. Los degradados de las tablas se calculan en
+# filtro/ui.py (degradado / fila_tenida); usar Styler.background_gradient lo
+# exigiría y rompe el despliegue en Streamlit Cloud.

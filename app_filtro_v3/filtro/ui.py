@@ -14,6 +14,8 @@ import pandas as pd
 from . import config as C
 from . import maestro as M
 
+VERSION = "3.2"   # debe coincidir con filtro/config.py
+
 # --------------------------------------------------------------- paleta
 # Dos afinaciones del mismo lenguaje visual. aplicar_tema() reescribe estas
 # variables del módulo y todo lo que las lea (tarjetas, padrón, leyendas)
@@ -102,7 +104,7 @@ def aplicar_tema(nombre: str = "claro") -> None:
                    "TERCERO": etiqueta(C.WARN, .16),
                    "NO DEFINIDO": etiqueta(C.IDLE, .14)}
     GRAVEDAD_ESTILO = {"GRAVE": etiqueta(C.CRIT), "MEDIO": etiqueta(C.WARN),
-                       "LEVE": etiqueta(C.OLIVE)}
+                       "LEVE": etiqueta(getattr(C, "OLIVE", "#7E8C33"))}
     PRIZE_ESTILO = {"ACTIVO EN PLANILLA": etiqueta(C.GOOD),
                     "CESADO": etiqueta(C.WARN),
                     "SIN DATO DE VIGENCIA": etiqueta(C.IDLE, .14),
@@ -111,6 +113,33 @@ def aplicar_tema(nombre: str = "claro") -> None:
 
 
 aplicar_tema("claro")
+
+
+# --------------------------------------------- tintes para st.dataframe
+# Nada de Styler.background_gradient: eso exige matplotlib, que no está en
+# requirements.txt y revienta en Streamlit Cloud. El degradado se calcula aquí
+# y de paso respeta el tema activo.
+def degradado(serie, color: str, suave: float = .06, fuerte: float = .55):
+    """Intensidad proporcional al valor de la columna. Devuelve estilos CSS."""
+    vals = pd.to_numeric(pd.Series(serie), errors="coerce").fillna(0)
+    tope = float(vals.max()) if len(vals) else 0.0
+    fuera = []
+    for v in vals:
+        try:
+            p = 0.0 if tope <= 0 else max(0.0, min(1.0, float(v) / tope))
+        except (TypeError, ValueError):
+            p = 0.0
+        if p <= 0:
+            fuera.append(f"color:{MUTED}")
+            continue
+        a = suave + (fuerte - suave) * p
+        fuera.append(f"background-color:{tenue(color, a)};color:{INK};font-weight:600")
+    return fuera
+
+
+def fila_tenida(color: str, alfa: float = .13) -> str:
+    """Estilo de fila completa teñida por gravedad / nivel, según el tema."""
+    return f"background-color:{tenue(color, alfa)};color:{INK}"
 
 
 def tight(s: str) -> str:
@@ -128,7 +157,8 @@ def esc(x) -> str:
 def color_indice(v) -> str:
     """Color del índice de riesgo, siguiendo la paleta del tema activo."""
     v = v or 0
-    return C.CRIT if v >= 75 else C.WARN if v >= 50 else C.AMBAR2 if v >= 30 else C.GOOD
+    return (C.CRIT if v >= 75 else C.WARN if v >= 50
+            else getattr(C, "AMBAR2", "#C07C11") if v >= 30 else C.GOOD)
 
 
 # ------------------------------------------------------------------ CSS
@@ -141,7 +171,8 @@ def css() -> str:
 :root{{
   --paper:{PAPER}; --surface:{SURFACE}; --surface-2:{SURFACE2}; --ink:{INK}; --ink-2:{INK2};
   --muted:{MUTED}; --rule:{RULE}; --rule-soft:{RULE_SOFT}; --brand:{C.BRAND};
-  --crit:{C.CRIT}; --warn:{C.WARN}; --good:{C.GOOD}; --olive:{C.OLIVE}; --idle:{C.IDLE};
+  --crit:{C.CRIT}; --warn:{C.WARN}; --good:{C.GOOD}; --idle:{C.IDLE};
+  --olive:{getattr(C, "OLIVE", "#7E8C33")};
   --velo:{VELO}; --shadow:{SOMBRA};
   --brand-suave:{tenue(C.BRAND, .14)}; --crit-suave:{tenue(C.CRIT, .12)};
 }}

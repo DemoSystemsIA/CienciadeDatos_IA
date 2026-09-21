@@ -7,6 +7,11 @@ Si el comité cambia un criterio, se cambia en este archivo y nada más.
 """
 from __future__ import annotations
 
+# Versión del paquete. app.py comprueba que TODOS los módulos coincidan:
+# un despliegue a medias (unos archivos nuevos y otros viejos) es la causa
+# más común de errores raros, y así se detecta con un mensaje claro.
+VERSION = "3.2"
+
 # ---------------------------------------------------------------- rutas
 import os as _os
 
