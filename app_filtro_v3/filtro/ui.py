@@ -14,7 +14,7 @@ import pandas as pd
 from . import config as C
 from . import maestro as M
 
-VERSION = "3.2"   # debe coincidir con filtro/config.py
+VERSION = "3.3"   # debe coincidir con filtro/config.py
 
 # --------------------------------------------------------------- paleta
 # Dos afinaciones del mismo lenguaje visual. aplicar_tema() reescribe estas

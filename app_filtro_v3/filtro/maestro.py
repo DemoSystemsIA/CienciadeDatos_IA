@@ -20,7 +20,7 @@ import re
 
 import pandas as pd
 
-VERSION = "3.2"   # debe coincidir con filtro/config.py
+VERSION = "3.3"   # debe coincidir con filtro/config.py
 
 SIN_MATCH = "NO PERTENECE A PRIZE"
 

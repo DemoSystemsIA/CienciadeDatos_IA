@@ -28,7 +28,7 @@ import zipfile
 from . import config as C
 from . import maestro as M
 
-VERSION = "3.2"   # debe coincidir con filtro/config.py
+VERSION = "3.3"   # debe coincidir con filtro/config.py
 
 # ------------------------------------------------------- historial en disco
 DIR_ESTADO = os.path.join(os.path.expanduser("~"), ".filtro_antecedentes")
@@ -394,15 +394,16 @@ def extraer_zip(archivo, destino: str) -> dict:
                 n_pdf += ext == ".pdf"
     except zipfile.BadZipFile:
         return dict(ok=False, motivo="El archivo no es un .zip válido.",
-                    excels=0, pdfs=0, ignorados=0, maestros=0, raiz=destino)
+                    excels=0, pdfs=0, ignorados=0, maestros=0, zips=0, raiz=destino)
     if not n_ex:
         return dict(ok=False, excels=0, pdfs=n_pdf, ignorados=n_ign, maestros=n_mae,
-                    raiz=destino, motivo=f"El .zip no trae ningún «{C.PATRON_EXCEL}».")
+                    zips=0, raiz=destino,
+                    motivo=f"El .zip no trae ningún «{C.PATRON_EXCEL}».")
     raiz = _raiz_dentro(destino)
     if n_mae and raiz != destino:      # el maestro va donde esté la raíz real
         _mover_maestro(destino, raiz)
     return dict(ok=True, excels=n_ex, pdfs=n_pdf, ignorados=n_ign, maestros=n_mae,
-                raiz=raiz, motivo="")
+                zips=0, raiz=raiz, motivo="")
 
 
 def _mover_maestro(origen: str, destino: str) -> None:
@@ -438,21 +439,31 @@ RE_CUADRILLA = re.compile(r'Resumen_NEW_VIP_(.+)', re.I)
 
 def guardar_sueltos(archivos, destino: str) -> dict:
     """
-    Alternativa al .zip: el usuario selecciona los archivos a mano.
+    Alternativa al .zip: el usuario elige una carpeta o los archivos a mano.
 
     Como el navegador no manda las carpetas, la cuadrilla se deduce del nombre
     del Excel (Resumen_NEW_VIP_<CUADRILLA>.xlsx) y todos los PDF van a una
     carpeta «Adjuntos» común — el cruce PDF -> persona es por DNI, no por
     carpeta, así que el resultado es el mismo.
+
+    Los .zip NO se abren por esta vía: una carpeta de trabajo suele tener
+    comprimidos sueltos (respaldos, envíos antiguos) que no son el padrón. Para
+    leer un comprimido está `extraer_zip`, que es el modo «.zip» del tablero.
     """
     shutil.rmtree(destino, ignore_errors=True)
     os.makedirs(destino, exist_ok=True)
     comun = os.path.join(destino, C.SUBCARPETA_PDF)
     os.makedirs(comun, exist_ok=True)
-    n_ex = n_pdf = n_ign = n_mae = 0
+    n_ex = n_pdf = n_ign = n_mae = n_zip = 0
     for f in archivos or []:
         base = os.path.basename(getattr(f, "name", "") or "")
         ext = os.path.splitext(base)[1].lower()
+        if ext in (".zip", ".rar", ".7z"):      # comprimidos: solo el modo .zip
+            n_zip += 1
+            continue
+        if ext not in EXT_PERMITIDAS or base.startswith("~$") or base.startswith("."):
+            n_ign += 1
+            continue
         datos = f.getbuffer() if hasattr(f, "getbuffer") else f.read()
         if M.parece_maestro(base):              # export de funcionarios
             _guardar_maestro(bytes(datos), destino, base)
@@ -461,7 +472,7 @@ def guardar_sueltos(archivos, destino: str) -> dict:
             with open(os.path.join(comun, base), "wb") as s:
                 s.write(datos)
             n_pdf += 1
-        elif ext in (".xlsx", ".xlsm") and not base.startswith("~$"):
+        elif ext in (".xlsx", ".xlsm"):
             m = RE_CUADRILLA.match(os.path.splitext(base)[0])
             cuad = (m.group(1) if m else os.path.splitext(base)[0]).strip() or "CUADRILLA"
             cuad = re.sub(r'[\\/:*?"<>|]', "_", cuad)
@@ -475,11 +486,14 @@ def guardar_sueltos(archivos, destino: str) -> dict:
         else:
             n_ign += 1
     if not n_ex:
+        extra = (f" Se saltaron {n_zip} comprimido(s): para leer un .zip usa el modo «.zip»."
+                 if n_zip else "")
         return dict(ok=False, excels=0, pdfs=n_pdf, ignorados=n_ign, maestros=n_mae,
-                    raiz=destino,
-                    motivo=f"Falta el «{C.PATRON_EXCEL}»: sin él no hay padrón que leer.")
+                    zips=n_zip, raiz=destino,
+                    motivo=f"Falta el «{C.PATRON_EXCEL}»: sin él no hay padrón que leer."
+                           + extra)
     return dict(ok=True, excels=n_ex, pdfs=n_pdf, ignorados=n_ign, maestros=n_mae,
-                raiz=destino, motivo="")
+                zips=n_zip, raiz=destino, motivo="")
 
 
 def etiqueta(ruta: str, ancho: int = 46) -> str:

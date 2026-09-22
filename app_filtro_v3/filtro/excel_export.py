@@ -12,7 +12,7 @@ from openpyxl.utils import get_column_letter
 from . import config as C
 from . import maestro as M
 
-VERSION = "3.2"   # debe coincidir con filtro/config.py
+VERSION = "3.3"   # debe coincidir con filtro/config.py
 
 F = "Arial"
 HDR_FILL = PatternFill("solid", fgColor="1F3864")

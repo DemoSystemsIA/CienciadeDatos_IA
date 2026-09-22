@@ -14,7 +14,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-VERSION = "3.2"
+VERSION = "3.3"
 
 
 # Streamlit renombró use_container_width -> width en 1.49; soportamos ambos.
@@ -105,6 +105,8 @@ def selector_de_carpeta_js():
     """
     components.html("""<script>
 const doc = window.parent.document;
+const PERMITIDAS = [".xlsx", ".xlsm", ".pdf", ".csv"];
+
 function marcar() {
   doc.querySelectorAll('section[data-testid="stSidebar"] input[type="file"]')
      .forEach(function (i) {
@@ -116,8 +118,37 @@ function marcar() {
         }
      });
 }
+
+// Una carpeta real trae de todo: .zip, imágenes, accesos directos, el propio
+// resultado_final.xlsx... Se descartan AQUI, antes de que nada se suba: la fase
+// de captura corre antes del manejador de Streamlit, así que basta con
+// reemplazar la lista de archivos del input.
+function filtrar(ev) {
+  const inp = ev.target;
+  if (!inp || !inp.files || !inp.hasAttribute('webkitdirectory')) return;
+  const buenos = Array.from(inp.files).filter(function (f) {
+    const n = (f.name || "").toLowerCase();
+    return PERMITIDAS.some(function (e) { return n.endsWith(e); });
+  });
+  if (buenos.length === inp.files.length) return;
+  const descartados = inp.files.length - buenos.length;
+  try {
+    const dt = new DataTransfer();
+    buenos.forEach(function (f) { dt.items.add(f); });
+    inp.files = dt.files;
+    console.log("[filtro] " + descartados + " archivo(s) descartados de la carpeta " +
+                "(.zip y otros formatos no se leen en este modo).");
+  } catch (e) {
+    console.warn("[filtro] no se pudo filtrar la carpeta:", e);
+  }
+}
+
 marcar();
 setInterval(marcar, 400);
+if (!doc.__filtroCarpeta) {
+  doc.addEventListener("change", filtrar, true);   // true = fase de captura
+  doc.__filtroCarpeta = true;
+}
 </script>""", height=0)
 
 
@@ -197,18 +228,26 @@ def panel_web() -> str:
         st.session_state["raiz_actual"] = rep["raiz"] if rep["ok"] else ""
 
     if modo.endswith("Carpeta"):
-        st.caption("Elige la carpeta de tu PC: el navegador manda su contenido "
-                   "(Excel y PDF). No se comprime nada.")
+        st.caption("Elige la carpeta de tu PC: el navegador manda su contenido. "
+                   "Solo se leen Excel, PDF y el maestro; **los .zip se ignoran** "
+                   "en este modo.")
         fs = st.file_uploader(
             "Elegir carpeta", accept_multiple_files=True, key="up_dir",
             label_visibility="collapsed",
             help="Se abrirá el selector de carpetas del navegador. Elige la carpeta "
                  "que contiene las cuadrillas y acepta el aviso de «subir varios "
-                 "archivos».")
+                 "archivos». Si dentro hay carpetas comprimidas, se saltan: para "
+                 "leer un .zip cambia al modo 🗜️ .zip.")
         selector_de_carpeta_js()
         if fs:
+            # Segunda barrera: si el navegador no filtró (versión antigua, otro
+            # motor), los .zip y cualquier otro formato se descartan aquí.
             utiles = [f for f in fs
                       if f.name.lower().endswith((".xlsx", ".xlsm", ".pdf", ".csv"))]
+            _zips = sum(1 for f in fs if f.name.lower().endswith(".zip"))
+            if _zips:
+                st.info(f"{_zips} archivo(s) .zip de la carpeta se ignoraron. "
+                        "Para leer uno, cambia al modo 🗜️ .zip.", icon="🗜️")
             _cargar(("carpeta", tuple(sorted((f.name, f.size) for f in utiles))),
                     lambda: carpetas.guardar_sueltos(utiles, destino),
                     f"carpeta · {len(utiles)} archivos")
@@ -236,6 +275,7 @@ def panel_web() -> str:
     if rep and rep["ok"]:
         st.caption(f"✅ {rep['excels']} Excel · {rep['pdfs']} PDF"
                    + (" · maestro de planilla" if rep.get("maestros") else "")
+                   + (f" · {rep['zips']} .zip saltados" if rep.get("zips") else "")
                    + (f" · {rep['ignorados']} ignorados" if rep["ignorados"] else ""))
     elif rep:
         st.error(rep["motivo"])

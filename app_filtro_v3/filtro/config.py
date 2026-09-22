@@ -10,7 +10,7 @@ from __future__ import annotations
 # Versión del paquete. app.py comprueba que TODOS los módulos coincidan:
 # un despliegue a medias (unos archivos nuevos y otros viejos) es la causa
 # más común de errores raros, y así se detecta con un mensaje claro.
-VERSION = "3.2"
+VERSION = "3.3"
 
 # ---------------------------------------------------------------- rutas
 import os as _os

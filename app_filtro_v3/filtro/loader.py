@@ -22,7 +22,7 @@ from .pdf_reader import parse_pdf
 from .classify import (clasificar, gravedad, caso_activo, anio, labor_personas,
                        indice_riesgo, nivel_riesgo, veredicto)
 
-VERSION = "3.2"   # debe coincidir con filtro/config.py
+VERSION = "3.3"   # debe coincidir con filtro/config.py
 
 CACHE_DIR = ".cache_filtro"
 RE_DNI = re.compile(r'(\d{6,})')

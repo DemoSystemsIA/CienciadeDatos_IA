@@ -35,11 +35,19 @@ La detección se puede forzar con la variable de entorno `FILTRO_MODO=local` o
 
 Tres formas, en la barra lateral:
 
-| Modo | Qué hace |
-|---|---|
-| **📁 Carpeta** | Abre el selector de **carpetas** del navegador: eliges tu carpeta y se manda su contenido. Sin comprimir nada |
-| **🗜️ .zip** | Subes la carpeta comprimida; conserva la estructura tal cual |
-| **📄 Archivos** | Seleccionas los archivos a mano (Excel, PDF y el maestro) |
+| Modo | Qué hace | Qué lee |
+|---|---|---|
+| **📁 Carpeta** | Abre el selector de **carpetas** del navegador: eliges tu carpeta y se manda su contenido. Sin comprimir nada | `.xlsx` `.xlsm` `.pdf` `.csv` — **los `.zip` se ignoran** |
+| **🗜️ .zip** | Subes la carpeta comprimida; conserva la estructura tal cual | solo `.zip` |
+| **📄 Archivos** | Seleccionas los archivos a mano (Excel, PDF y el maestro) | `.xlsx` `.xlsm` `.pdf` `.csv` |
+
+**Por qué el modo Carpeta salta los `.zip`:** una carpeta de trabajo real suele tener
+comprimidos sueltos (respaldos, envíos antiguos, el resultado de una corrida anterior)
+que no son el padrón. Subirlos sería lento y no aportaría nada, así que se descartan
+**en el navegador, antes de subir** — un filtro en fase de captura reemplaza la lista de
+archivos del input, y la consola deja constancia de cuántos saltó. Por si el navegador
+no lo soportara, `guardar_sueltos()` los vuelve a descartar en el servidor y el tablero
+avisa. Para leer un comprimido está el modo **🗜️ .zip**, que sí lo abre.
 
 El modo *Carpeta* añade el atributo `webkitdirectory` al cargador de Streamlit desde el
 propio navegador (`selector_de_carpeta_js()` en `app.py`). El navegador no manda las
