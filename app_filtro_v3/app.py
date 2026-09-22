@@ -14,7 +14,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-VERSION = "3.3"
+VERSION = "3.4"
 
 
 # Streamlit renombró use_container_width -> width en 1.49; soportamos ambos.
@@ -105,7 +105,20 @@ def selector_de_carpeta_js():
     """
     components.html("""<script>
 const doc = window.parent.document;
-const PERMITIDAS = [".xlsx", ".xlsm", ".pdf", ".csv"];
+
+// Qué se sube de una carpeta: SOLO el Excel de cada carpeta madre, los PDF de
+// su subcarpeta Adjuntos y el export de funcionarios. Nada más: ni .zip, ni
+// .py, ni cachés, ni el resultado_final de una corrida anterior.
+const RE_EXCEL   = /(^|\/)Resumen_NEW_VIP_[^\/]*\.(xlsx|xlsm)$/i;
+const RE_PDF     = /(^|\/)Adjuntos?\/[^\/]+\.pdf$/i;
+const RE_MAESTRO = /(^|\/)[^\/]*(funcionario|qbiz|maestro|planilla|personal)[^\/]*\.(csv|xlsx|xlsm)$/i;
+const RE_BASURA  = /(^|\/)(\.|~\$|__pycache__\/|\.cache_filtro\/)/;
+
+function sirve(f) {
+  const ruta = f.webkitRelativePath || f.name || "";
+  if (RE_BASURA.test(ruta)) return false;
+  return RE_EXCEL.test(ruta) || RE_PDF.test(ruta) || RE_MAESTRO.test(ruta);
+}
 
 function marcar() {
   doc.querySelectorAll('section[data-testid="stSidebar"] input[type="file"]')
@@ -119,25 +132,22 @@ function marcar() {
      });
 }
 
-// Una carpeta real trae de todo: .zip, imágenes, accesos directos, el propio
-// resultado_final.xlsx... Se descartan AQUI, antes de que nada se suba: la fase
-// de captura corre antes del manejador de Streamlit, así que basta con
-// reemplazar la lista de archivos del input.
+// Se filtra en fase de captura: corre ANTES del manejador de Streamlit, así que
+// basta con reemplazar la lista de archivos del input y lo descartado no se
+// sube nunca.
 function filtrar(ev) {
   const inp = ev.target;
   if (!inp || !inp.files || !inp.hasAttribute('webkitdirectory')) return;
-  const buenos = Array.from(inp.files).filter(function (f) {
-    const n = (f.name || "").toLowerCase();
-    return PERMITIDAS.some(function (e) { return n.endsWith(e); });
-  });
-  if (buenos.length === inp.files.length) return;
-  const descartados = inp.files.length - buenos.length;
+  const total = inp.files.length;
+  const buenos = Array.from(inp.files).filter(sirve);
+  if (buenos.length === total) return;
   try {
     const dt = new DataTransfer();
     buenos.forEach(function (f) { dt.items.add(f); });
     inp.files = dt.files;
-    console.log("[filtro] " + descartados + " archivo(s) descartados de la carpeta " +
-                "(.zip y otros formatos no se leen en este modo).");
+    console.log("[filtro] carpeta: " + buenos.length + " de " + total +
+                " archivos (se ignoran .zip, .py, cachés y todo lo que no sea " +
+                "el Excel de la cuadrilla, los PDF de Adjuntos o el maestro).");
   } catch (e) {
     console.warn("[filtro] no se pudo filtrar la carpeta:", e);
   }
@@ -146,7 +156,7 @@ function filtrar(ev) {
 marcar();
 setInterval(marcar, 400);
 if (!doc.__filtroCarpeta) {
-  doc.addEventListener("change", filtrar, true);   // true = fase de captura
+  doc.addEventListener("change", filtrar, true);
   doc.__filtroCarpeta = true;
 }
 </script>""", height=0)
@@ -228,28 +238,35 @@ def panel_web() -> str:
         st.session_state["raiz_actual"] = rep["raiz"] if rep["ok"] else ""
 
     if modo.endswith("Carpeta"):
-        st.caption("Elige la carpeta de tu PC: el navegador manda su contenido. "
-                   "Solo se leen Excel, PDF y el maestro; **los .zip se ignoran** "
-                   "en este modo.")
+        st.caption("Elige la carpeta de tu PC. Solo se leen **el Excel de cada "
+                   "cuadrilla y los PDF de su carpeta Adjuntos** (más el maestro, "
+                   "si está): los .zip, .py y cualquier otro archivo se ignoran, "
+                   "así la carga es mucho más rápida.")
         fs = st.file_uploader(
             "Elegir carpeta", accept_multiple_files=True, key="up_dir",
-            label_visibility="collapsed",
+            type=["xlsx", "xlsm", "pdf", "csv"], label_visibility="collapsed",
             help="Se abrirá el selector de carpetas del navegador. Elige la carpeta "
                  "que contiene las cuadrillas y acepta el aviso de «subir varios "
-                 "archivos». Si dentro hay carpetas comprimidas, se saltan: para "
-                 "leer un .zip cambia al modo 🗜️ .zip.")
+                 "archivos». Para leer una carpeta comprimida, cambia al modo 🗜️ .zip.")
         selector_de_carpeta_js()
         if fs:
-            # Segunda barrera: si el navegador no filtró (versión antigua, otro
-            # motor), los .zip y cualquier otro formato se descartan aquí.
+            # Segunda barrera, por si el navegador no filtró: solo pasan el Excel
+            # de la cuadrilla, los PDF y el maestro reconocible por su nombre.
             utiles = [f for f in fs
-                      if f.name.lower().endswith((".xlsx", ".xlsm", ".pdf", ".csv"))]
-            _zips = sum(1 for f in fs if f.name.lower().endswith(".zip"))
+                      if maestro.es_resumen_cuadrilla(f.name)
+                      or maestro.parece_maestro(f.name, estricto=True)
+                      or f.name.lower().endswith(".pdf")]
+            _zips = sum(1 for f in fs if f.name.lower().endswith(
+                (".zip", ".rar", ".7z", ".gz", ".tar")))
+            _otros = len(fs) - len(utiles) - _zips
             if _zips:
-                st.info(f"{_zips} archivo(s) .zip de la carpeta se ignoraron. "
+                st.info(f"{_zips} comprimido(s) de la carpeta se ignoraron. "
                         "Para leer uno, cambia al modo 🗜️ .zip.", icon="🗜️")
+            if _otros > 0:
+                st.caption(f"{_otros} archivo(s) más se ignoraron por no ser el Excel "
+                           "de una cuadrilla, un PDF de Adjuntos ni el maestro.")
             _cargar(("carpeta", tuple(sorted((f.name, f.size) for f in utiles))),
-                    lambda: carpetas.guardar_sueltos(utiles, destino),
+                    lambda: carpetas.guardar_sueltos(utiles, destino, estricto=True),
                     f"carpeta · {len(utiles)} archivos")
     elif modo.endswith(".zip"):
         z = st.file_uploader(

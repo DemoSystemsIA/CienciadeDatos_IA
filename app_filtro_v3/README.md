@@ -35,19 +35,34 @@ La detección se puede forzar con la variable de entorno `FILTRO_MODO=local` o
 
 Tres formas, en la barra lateral:
 
-| Modo | Qué hace | Qué lee |
+| Modo | Qué hace | Qué sube |
 |---|---|---|
-| **📁 Carpeta** | Abre el selector de **carpetas** del navegador: eliges tu carpeta y se manda su contenido. Sin comprimir nada | `.xlsx` `.xlsm` `.pdf` `.csv` — **los `.zip` se ignoran** |
+| **📁 Carpeta** | Abre el selector de **carpetas** del navegador: eliges tu carpeta y se manda su contenido. Sin comprimir nada | **solo** `<cuadrilla>/Resumen_NEW_VIP_*.xlsx`, `<cuadrilla>/Adjuntos/*.pdf` y el maestro |
 | **🗜️ .zip** | Subes la carpeta comprimida; conserva la estructura tal cual | solo `.zip` |
-| **📄 Archivos** | Seleccionas los archivos a mano (Excel, PDF y el maestro) | `.xlsx` `.xlsm` `.pdf` `.csv` |
+| **📄 Archivos** | Seleccionas los archivos a mano | `.xlsx` `.xlsm` `.pdf` `.csv` |
 
-**Por qué el modo Carpeta salta los `.zip`:** una carpeta de trabajo real suele tener
-comprimidos sueltos (respaldos, envíos antiguos, el resultado de una corrida anterior)
-que no son el padrón. Subirlos sería lento y no aportaría nada, así que se descartan
-**en el navegador, antes de subir** — un filtro en fase de captura reemplaza la lista de
-archivos del input, y la consola deja constancia de cuántos saltó. Por si el navegador
-no lo soportara, `guardar_sueltos()` los vuelve a descartar en el servidor y el tablero
-avisa. Para leer un comprimido está el modo **🗜️ .zip**, que sí lo abre.
+**El modo Carpeta sube lo mínimo.** Una carpeta de trabajo real tiene de todo:
+comprimidos de respaldo, el propio código, `__pycache__`, el `resultado_final.xlsx` de
+una corrida anterior, fotos sueltas. Nada de eso es el padrón, así que se descarta
+**en el navegador, antes de subir** — el filtro mira la ruta relativa de cada archivo
+(`webkitRelativePath`) y solo deja pasar tres cosas:
+
+| Se sube | Regla |
+|---|---|
+| El Excel de cada carpeta madre | `…/Resumen_NEW_VIP_*.xlsx` |
+| Los PDF de su subcarpeta Adjuntos | `…/Adjuntos/*.pdf` |
+| El maestro de funcionarios | nombre con `funcionario`, `qbiz`, `maestro`, `planilla` o `personal` |
+
+Un PDF que esté fuera de `Adjuntos`, o un `.xlsx` que no sea el resumen de la cuadrilla,
+no se suben. En una prueba con una carpeta de 151 archivos se enviaron 133 (6 Excel +
+126 PDF + el maestro) y quedaron fuera 3 `.zip`, 10 `.py`, el `.pyc`, el
+`resultado_final.xlsx` y un PDF suelto.
+
+Hay tres barreras, por si alguna falla: el filtro del navegador (nada se sube), el
+`type=` del cargador de Streamlit (el navegador rechaza lo que no sea xlsx/xlsm/pdf/csv)
+y `guardar_sueltos(..., estricto=True)` en el servidor, que vuelve a clasificar por
+nombre y cuenta aparte los comprimidos para avisarte. Para leer un comprimido está el
+modo **🗜️ .zip**, que sí lo abre.
 
 El modo *Carpeta* añade el atributo `webkitdirectory` al cargador de Streamlit desde el
 propio navegador (`selector_de_carpeta_js()` en `app.py`). El navegador no manda las

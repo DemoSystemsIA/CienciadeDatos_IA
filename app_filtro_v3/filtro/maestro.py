@@ -20,7 +20,7 @@ import re
 
 import pandas as pd
 
-VERSION = "3.3"   # debe coincidir con filtro/config.py
+VERSION = "3.4"   # debe coincidir con filtro/config.py
 
 SIN_MATCH = "NO PERTENECE A PRIZE"
 
@@ -84,16 +84,39 @@ def _fecha(v):
         return pd.NaT
 
 
-def parece_maestro(nombre: str) -> bool:
+# Palabras que delatan al export de funcionarios cuando hay que reconocerlo
+# entre cientos de archivos (carga de carpeta completa).
+CLAVES_MAESTRO = ("funcionario", "qbiz", "maestro", "planilla", "padron_prize",
+                  "padron prize", "personal")
+
+
+def es_resumen_cuadrilla(nombre: str) -> bool:
+    """¿Es el Resumen_NEW_VIP_<CUADRILLA>.xlsx de una carpeta madre?"""
+    base = os.path.basename(str(nombre or ""))
+    raiz_, ext = os.path.splitext(base)
+    return (ext.lower() in (".xlsx", ".xlsm")
+            and raiz_.upper().startswith("RESUMEN_NEW_VIP")
+            and not base.startswith("~$"))
+
+
+def parece_maestro(nombre: str, estricto: bool = False) -> bool:
     """
     ¿Este archivo suelto es el export de funcionarios y no un Resumen de cuadrilla?
-    Sirve para clasificar lo que se sube desde el navegador.
+
+    `estricto=True` (carga de una carpeta entera) exige además que el nombre
+    diga de qué se trata: en una carpeta de trabajo hay muchos .xlsx sueltos
+    (resultado_final, cuadros del comité…) que no son el maestro.
     """
     base = os.path.basename(str(nombre or ""))
     raiz_, ext = os.path.splitext(base)
-    if ext.lower() not in (".csv", ".xlsx", ".xlsm"):
+    if ext.lower() not in (".csv", ".xlsx", ".xlsm") or base.startswith("~$"):
         return False
-    return not raiz_.upper().startswith("RESUMEN_NEW_VIP")
+    if es_resumen_cuadrilla(base):
+        return False
+    if estricto:
+        bajo = raiz_.lower()
+        return any(k in bajo for k in CLAVES_MAESTRO)
+    return True
 
 
 def localizar(raiz: str) -> str | None:

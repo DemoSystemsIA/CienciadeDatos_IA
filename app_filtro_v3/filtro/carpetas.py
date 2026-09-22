@@ -28,7 +28,7 @@ import zipfile
 from . import config as C
 from . import maestro as M
 
-VERSION = "3.3"   # debe coincidir con filtro/config.py
+VERSION = "3.4"   # debe coincidir con filtro/config.py
 
 # ------------------------------------------------------- historial en disco
 DIR_ESTADO = os.path.join(os.path.expanduser("~"), ".filtro_antecedentes")
@@ -347,6 +347,7 @@ def _destino_seguro(base: str, nombre: str) -> str | None:
 
 
 EXT_PERMITIDAS = (".xlsx", ".xlsm", ".pdf", ".csv")
+COMPRIMIDOS = (".zip", ".rar", ".7z", ".gz", ".tar")
 
 
 def _guardar_maestro(datos: bytes, destino: str, nombre: str) -> None:
@@ -437,54 +438,70 @@ def _raiz_dentro(base: str) -> str:
 RE_CUADRILLA = re.compile(r'Resumen_NEW_VIP_(.+)', re.I)
 
 
-def guardar_sueltos(archivos, destino: str) -> dict:
+def guardar_sueltos(archivos, destino: str, estricto: bool = False) -> dict:
     """
-    Alternativa al .zip: el usuario elige una carpeta o los archivos a mano.
+    Reconstruye la carpeta de trabajo a partir de archivos sueltos del navegador.
+
+    Solo interesan tres cosas, y todo lo demás se descarta sin abrirlo:
+      · el `Resumen_NEW_VIP_<CUADRILLA>.xlsx` de cada carpeta madre
+      · los PDF (que en el original viven en la subcarpeta `Adjuntos`)
+      · el export de funcionarios, si viene
 
     Como el navegador no manda las carpetas, la cuadrilla se deduce del nombre
-    del Excel (Resumen_NEW_VIP_<CUADRILLA>.xlsx) y todos los PDF van a una
-    carpeta «Adjuntos» común — el cruce PDF -> persona es por DNI, no por
-    carpeta, así que el resultado es el mismo.
+    del Excel y todos los PDF van a una carpeta «Adjuntos» común: el cruce
+    PDF -> persona es por DNI, no por carpeta, así que el resultado es el mismo.
 
-    Los .zip NO se abren por esta vía: una carpeta de trabajo suele tener
-    comprimidos sueltos (respaldos, envíos antiguos) que no son el padrón. Para
-    leer un comprimido está `extraer_zip`, que es el modo «.zip» del tablero.
+    `estricto=True` es la carga de UNA CARPETA ENTERA: ahí hay .zip, .py,
+    imágenes, cachés y Excel que no son el padrón, y nada de eso debe pasar.
+    Los comprimidos nunca se abren por esta vía — para eso está `extraer_zip`,
+    que es el modo «.zip» del tablero.
     """
     shutil.rmtree(destino, ignore_errors=True)
     os.makedirs(destino, exist_ok=True)
     comun = os.path.join(destino, C.SUBCARPETA_PDF)
     os.makedirs(comun, exist_ok=True)
     n_ex = n_pdf = n_ign = n_mae = n_zip = 0
+
     for f in archivos or []:
         base = os.path.basename(getattr(f, "name", "") or "")
         ext = os.path.splitext(base)[1].lower()
-        if ext in (".zip", ".rar", ".7z"):      # comprimidos: solo el modo .zip
+
+        if ext in COMPRIMIDOS:                  # solo el modo «.zip» los abre
             n_zip += 1
             continue
-        if ext not in EXT_PERMITIDAS or base.startswith("~$") or base.startswith("."):
+        if not base or base.startswith("~$") or base.startswith("."):
             n_ign += 1
             continue
+
+        # 1) el Excel de la carpeta madre   2) el maestro   3) los PDF
+        if M.es_resumen_cuadrilla(base):
+            destino_tipo = "excel"
+        elif M.parece_maestro(base, estricto=estricto):
+            destino_tipo = "maestro"
+        elif ext == ".pdf":
+            destino_tipo = "pdf"
+        else:
+            n_ign += 1
+            continue
+
         datos = f.getbuffer() if hasattr(f, "getbuffer") else f.read()
-        if M.parece_maestro(base):              # export de funcionarios
+        if destino_tipo == "maestro":
             _guardar_maestro(bytes(datos), destino, base)
             n_mae += 1
-        elif ext == ".pdf":
-            with open(os.path.join(comun, base), "wb") as s:
-                s.write(datos)
+        elif destino_tipo == "pdf":
+            with open(os.path.join(comun, base), "wb") as sal:
+                sal.write(datos)
             n_pdf += 1
-        elif ext in (".xlsx", ".xlsm"):
+        else:
             m = RE_CUADRILLA.match(os.path.splitext(base)[0])
             cuad = (m.group(1) if m else os.path.splitext(base)[0]).strip() or "CUADRILLA"
             cuad = re.sub(r'[\\/:*?"<>|]', "_", cuad)
             carpeta = os.path.join(destino, cuad)
             os.makedirs(carpeta, exist_ok=True)
-            nombre = base if RE_CUADRILLA.match(os.path.splitext(base)[0]) \
-                else f"Resumen_NEW_VIP_{cuad}.xlsx"
-            with open(os.path.join(carpeta, nombre), "wb") as s:
-                s.write(datos)
+            with open(os.path.join(carpeta, base), "wb") as sal:
+                sal.write(datos)
             n_ex += 1
-        else:
-            n_ign += 1
+
     if not n_ex:
         extra = (f" Se saltaron {n_zip} comprimido(s): para leer un .zip usa el modo «.zip»."
                  if n_zip else "")
